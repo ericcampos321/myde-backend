@@ -1,1 +1,4 @@
-export { getRedisConnectionOptions } from "./redis.js";
+export {
+  getRedisConnectionOptions,
+  parseRedisConnectionOptions,
+} from "./redis.js";

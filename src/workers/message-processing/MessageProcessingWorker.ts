@@ -4,6 +4,13 @@ import {
   type Job,
 } from "bullmq";
 import { pathToFileURL } from "node:url";
+import {
+  WORKER_AUTORUN,
+  WORKER_CONCURRENCY,
+  WORKER_LOCK_DURATION_MS,
+  WORKER_MAX_STALLED_COUNT,
+  WORKER_STALLED_INTERVAL_MS,
+} from "../../config/defaults/worker-defaults.js";
 import { getRedisConnectionOptions } from "../../infrastructure/index.js";
 import { closeDb } from "../../db/client.js";
 import { createLogger } from "../../shared/logger/logger.js";
@@ -63,8 +70,11 @@ export async function createMessageProcessingWorker(
     },
     {
       connection,
-      autorun: dependencies.autorun ?? true,
-      concurrency: dependencies.concurrency ?? 5,
+      autorun: dependencies.autorun ?? WORKER_AUTORUN,
+      concurrency: dependencies.concurrency ?? WORKER_CONCURRENCY,
+      lockDuration: WORKER_LOCK_DURATION_MS,
+      stalledInterval: WORKER_STALLED_INTERVAL_MS,
+      maxStalledCount: WORKER_MAX_STALLED_COUNT,
     }
   );
 
@@ -124,7 +134,7 @@ async function bootstrap(): Promise<void> {
   log.info(
     {
       jobName: PROCESS_INBOUND_MESSAGE_JOB,
-      concurrency: 5,
+      concurrency: WORKER_CONCURRENCY,
       aiProvider: aiResponseService.source,
     },
     "worker de processamento iniciado"

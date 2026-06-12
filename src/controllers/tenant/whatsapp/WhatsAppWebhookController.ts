@@ -1,22 +1,13 @@
 import type { FastifyInstance, FastifyPluginOptions } from "fastify";
-import {
-  metaWebhookHeadersSchema,
-  metaWebhookVerificationQuerySchema,
-} from "../../../schemas/tenant/whatsapp/WhatsAppWebhookSchemas.js";
-import type {
-  MetaWebhookHeaders,
-  MetaWebhookVerificationQuery,
-} from "../../../types/tenant/whatsapp/WhatsAppWebhookTypes.js";
+import { metaWebhookHeadersSchema, metaWebhookVerificationQuerySchema } from "../../../schemas/tenant/whatsapp/WhatsAppWebhookSchemas.js";
+import type { MetaWebhookHeaders, MetaWebhookVerificationQuery } from "../../../types/tenant/whatsapp/WhatsAppWebhookTypes.js";
 import { WhatsAppWebhookService } from "../../../services/tenant/whatsapp/WhatsAppWebhookService.js";
 
 export interface WhatsAppWebhookControllerOptions extends FastifyPluginOptions {
   webhookService?: WhatsAppWebhookService;
 }
 
-export async function whatsAppWebhookController(
-  app: FastifyInstance,
-  options: WhatsAppWebhookControllerOptions
-): Promise<void> {
+export async function whatsAppWebhookController(app: FastifyInstance, options: WhatsAppWebhookControllerOptions): Promise<void> {
   const webhookService = options.webhookService ?? new WhatsAppWebhookService();
 
   app.get<{ Querystring: MetaWebhookVerificationQuery }>(

@@ -1,4 +1,5 @@
-import { Queue, type JobsOptions } from "bullmq";
+import { Queue } from "bullmq";
+import { messageProcessingJobOptions } from "../../config/defaults/bullmq-defaults.js";
 import { getRedisConnectionOptions } from "../../infrastructure/index.js";
 import { createLogger } from "../../shared/logger/logger.js";
 import {
@@ -14,26 +15,13 @@ const log = createLogger({
   queue: MESSAGE_PROCESSING_QUEUE,
 });
 
-const defaultJobOptions: JobsOptions = {
-  attempts: 5,
-  backoff: { type: "exponential", delay: 3000 },
-  removeOnComplete: {
-    age: 60 * 60 * 24,
-    count: 1000,
-  },
-  removeOnFail: {
-    count: 1000,
-  },
-};
-
 let messageProcessingQueue: Queue<MessageProcessingJobPayload> | null = null;
-
 
 function getQueue(): Queue<MessageProcessingJobPayload> {
   if (!messageProcessingQueue) {
     messageProcessingQueue = new Queue(MESSAGE_PROCESSING_QUEUE, {
       connection: getRedisConnectionOptions(),
-      defaultJobOptions,
+      defaultJobOptions: messageProcessingJobOptions,
     });
   }
 

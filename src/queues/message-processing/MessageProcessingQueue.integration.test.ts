@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { Queue } from "bullmq";
-import { env } from "../../config/env.js";
+import { getRedisConnectionOptions } from "../../infrastructure/index.js";
 import {
   BullMqMessageProcessingQueue,
   closeMessageProcessingQueue,
@@ -17,19 +17,9 @@ let inspectionQueue: Queue | null = null;
 beforeAll(() => {
   if (!runRedisTests) return;
 
-  const redisUrl = new URL(env.REDIS_URL);
-  const database =
-    redisUrl.pathname.length > 1 ? Number(redisUrl.pathname.slice(1)) : undefined;
-  const host = redisUrl.hostname === "localhost" ? "127.0.0.1" : redisUrl.hostname;
+  // Mesma fonte de conexão que Queue/Worker, sem reimplementar o parsing.
   inspectionQueue = new Queue(MESSAGE_PROCESSING_QUEUE, {
-    connection: {
-      host,
-      port: redisUrl.port ? Number(redisUrl.port) : 6379,
-      username: redisUrl.username || undefined,
-      password: redisUrl.password || undefined,
-      db: Number.isNaN(database) ? undefined : database,
-      maxRetriesPerRequest: null,
-    },
+    connection: getRedisConnectionOptions(),
   });
 });
 
