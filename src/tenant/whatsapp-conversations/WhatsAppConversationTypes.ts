@@ -1,8 +1,12 @@
-export interface Conversation {
-  id: string;
+import type {
+  NewWhatsAppConversation,
+  WhatsAppConversation,
+} from "../../db/schema.js";
+
+export type { NewWhatsAppConversation, WhatsAppConversation };
+
+export interface UpsertOpenConversationInput {
   tenantId: string;
   contactId: string;
-  status: string;
-  lastMessageAt: string | null;
-  createdAt: string;
+  lastMessageAt: Date | null;
 }

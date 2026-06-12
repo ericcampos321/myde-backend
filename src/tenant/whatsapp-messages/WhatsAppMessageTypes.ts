@@ -1,13 +1,20 @@
-export type MessageDirection = "inbound" | "outbound";
+import type { NewWhatsAppMessage, WhatsAppMessage } from "../../db/schema.js";
 
-export interface Message {
-  id: string;
+export type { NewWhatsAppMessage, WhatsAppMessage };
+export type MessageDirection = WhatsAppMessage["direction"];
+
+export interface CreateInboundMessageInput {
   tenantId: string;
   conversationId: string;
-  direction: MessageDirection;
   body: string;
+  externalMessageId: string;
+  createdAt: Date;
+}
+
+export interface CreateOutboundMessageInput {
+  tenantId: string;
+  conversationId: string;
+  body: string;
+  replyToMessageId: string;
   status: string;
-  externalMessageId: string | null;
-  replyToMessageId: string | null;
-  createdAt: string;
 }

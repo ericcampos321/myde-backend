@@ -1,8 +1,11 @@
-export interface Contact {
-  id: string;
-  tenantId: string;
-  phone: string;
-  name: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
+import type {
+  NewWhatsAppContact,
+  WhatsAppContact,
+} from "../../db/schema.js";
+
+export type { NewWhatsAppContact, WhatsAppContact };
+
+export type UpsertWhatsAppContactInput = Pick<
+  NewWhatsAppContact,
+  "tenantId" | "phone" | "name"
+>;

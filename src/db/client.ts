@@ -11,6 +11,7 @@ import * as schema from "./schema.js";
 const sql = postgres(env.DATABASE_URL, { max: 10 });
 
 export const db = drizzle(sql, { schema });
+export type Database = typeof db;
 
 /** Encerra o pool de conexões no shutdown. */
 export async function closeDb(): Promise<void> {

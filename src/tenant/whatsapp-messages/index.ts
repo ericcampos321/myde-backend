@@ -1,2 +1,2 @@
-export type { Message, MessageDirection } from "./WhatsAppMessageTypes.js";
-export * from "./WhatsAppMessageRepository.js";
+export * from "./WhatsAppMessageTypes.js";
+export { WhatsAppMessageRepository } from "./WhatsAppMessageRepository.js";

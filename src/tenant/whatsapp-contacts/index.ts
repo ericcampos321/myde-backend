@@ -1,2 +1,2 @@
-export type { Contact } from "./WhatsAppContactTypes.js";
-export * from "./WhatsAppContactRepository.js";
+export * from "./WhatsAppContactTypes.js";
+export { WhatsAppContactRepository } from "./WhatsAppContactRepository.js";

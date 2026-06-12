@@ -1,5 +1,5 @@
-export type { Conversation } from "./WhatsAppConversationTypes.js";
+export * from "./WhatsAppConversationTypes.js";
 export * from "./WhatsAppConversationController.js";
 export * from "./WhatsAppConversationService.js";
-export * from "./WhatsAppConversationRepository.js";
+export { WhatsAppConversationRepository } from "./WhatsAppConversationRepository.js";
 export * from "./WhatsAppConversationSchemas.js";

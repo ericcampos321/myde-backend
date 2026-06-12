@@ -3,8 +3,8 @@
 Backend de **Atendimento WhatsApp com IA** — recebe webhooks da Meta, persiste
 mensagens, processa de forma assíncrona com uma LLM e responde via Meta API (mock).
 
-> Estado atual: **fundação** (API Fastify + estrutura de worker dedicado).
-> Webhook, BullMQ, banco e OpenAI entram em commits subsequentes.
+> Estado atual: API Fastify, webhook assinado, schema Drizzle e repositories
+> base. BullMQ, processamento real do worker e OpenAI entram depois.
 
 ---
 
@@ -20,7 +20,7 @@ mensagens, processa de forma assíncrona com uma LLM e responde via Meta API (mo
 | Logs | Pino (estruturado) |
 | Testes | Vitest |
 
-**Decisões:** PostgreSQL é a fonte da verdade; Redis/BullMQ é apenas dispatch.
+**Decisões:** PostgreSQL é a fonte da verdade; Redis/BullMQ será apenas dispatch.
 Sem SQS, sem LocalStack. Tenant resolvido por `metadata.phone_number_id` /
 `entry[].id` do payload — tenant desconhecido é rejeitado, sem auto-provisionar.
 
@@ -58,6 +58,7 @@ src/
     whatsapp-conversations/
     whatsapp-messages/
     whatsapp-meta/
+    whatsapp-tenants/
     ai-responses/   AiTypes, providers/, knowledge-base/
     message-processing/  fila, processor e worker dedicado
 ```
@@ -96,6 +97,24 @@ npm run build
 npm test
 ```
 
+### Banco de dados
+
+O schema Drizzle fica em `src/db/schema.ts` e as migrations em
+`src/db/migrations/`. O seed explícito cria ou atualiza o tenant padrão
+**NeoFibra** usando `META_PHONE_NUMBER_ID`; ele não roda no startup da API.
+
+```bash
+npm run db:generate
+npm run db:migrate
+npm run db:seed
+
+# Suíte de integração dos repositories, com Postgres migrado disponível
+RUN_DB_TESTS=true npm test
+```
+
+PostgreSQL permanece a fonte da verdade. Redis/BullMQ será adicionado apenas
+como dispatch; SQS e LocalStack não fazem parte da solução.
+
 ---
 
 ## Scripts
@@ -108,7 +127,8 @@ npm test
 | `start` / `start:worker` | Roda o build de produção |
 | `typecheck` | `tsc --noEmit` |
 | `test` / `test:watch` | Vitest |
-| `db:generate` / `db:migrate` | Drizzle Kit |
+| `db:generate` / `db:migrate` | Gera e aplica migrations Drizzle |
+| `db:seed` | Cria ou atualiza o tenant padrão NeoFibra |
 
 ---
 
