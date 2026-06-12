@@ -1,4 +1,4 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyRequest } from "fastify";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -13,21 +13,37 @@ declare module "fastify" {
  * X-Hub-Signature-256 da Meta sobre o corpo exatamente como recebido.
  */
 export async function registerRawBody(app: FastifyInstance): Promise<void> {
+  const parseJsonWithRawBody = (
+    req: FastifyRequest,
+    body: Buffer,
+    done: (err: Error | null, body?: unknown) => void
+  ): void => {
+    req.rawBody = body;
+    if (body.length === 0) {
+      done(null, undefined);
+      return;
+    }
+
+    try {
+      done(null, JSON.parse(body.toString("utf8")));
+    } catch (err) {
+      done(err as Error, undefined);
+    }
+  };
+
   app.addContentTypeParser(
     "application/json",
     { parseAs: "buffer" },
     (req, body, done) => {
-      const buf = body as Buffer;
-      req.rawBody = buf;
-      if (buf.length === 0) {
-        done(null, undefined);
-        return;
-      }
-      try {
-        done(null, JSON.parse(buf.toString("utf8")));
-      } catch (err) {
-        done(err as Error, undefined);
-      }
+      parseJsonWithRawBody(req, body as Buffer, done);
+    }
+  );
+
+  app.addContentTypeParser(
+    /^application\/(.+\+)?json(;.*)?$/i,
+    { parseAs: "buffer" },
+    (req, body, done) => {
+      parseJsonWithRawBody(req, body as Buffer, done);
     }
   );
 }

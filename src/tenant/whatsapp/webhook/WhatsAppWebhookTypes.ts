@@ -1,13 +1,13 @@
-/**
- * Representação normalizada de uma mensagem inbound, extraída do payload da
- * Meta pelo WhatsAppPayloadMapper (implementado no commit do webhook).
- */
-export interface NormalizedInboundMessage {
-  phoneNumberId: string;
-  wabaId: string;
-  externalMessageId: string;
-  from: string;
-  contactName: string | null;
-  text: string;
-  timestamp: string;
+export interface MetaWebhookVerificationQuery {
+  "hub.mode"?: string;
+  "hub.verify_token"?: string;
+  "hub.challenge"?: string;
+}
+
+export interface MetaWebhookHeaders {
+  "x-hub-signature-256"?: string;
+}
+
+export interface MetaWebhookAckResponse {
+  received: true;
 }

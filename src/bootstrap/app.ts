@@ -6,6 +6,7 @@ import { registerCors } from "../plugins/cors.plugin.js";
 import { registerSensible } from "../plugins/sensible.plugin.js";
 import { registerRawBody } from "../plugins/raw-body.plugin.js";
 import { healthController } from "../api/health/index.js";
+import { whatsAppWebhookController } from "../tenant/whatsapp/webhook/index.js";
 
 /**
  * Monta a instância Fastify com plugins e rotas, sem subir o listener.
@@ -24,6 +25,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   app.setErrorHandler(httpErrorHandler);
 
   await app.register(healthController);
+  await app.register(whatsAppWebhookController);
 
   return app;
 }
