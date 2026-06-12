@@ -9,6 +9,12 @@ export {
   type EnqueueInboundMessageResult,
   type MessageProcessingJobPayload,
   type MessageProcessingQueuePort,
+  type MessageProcessingResult,
 } from "./MessageProcessingQueueTypes.js";
 export { installWorkerShutdown } from "./MessageProcessingWorkerRuntime.js";
-export { processMessageJob } from "./MessageProcessingProcessor.js";
+export {
+  MessageProcessingProcessor,
+  createMessageProcessingProcessor,
+  type MessageProcessingProcessorDependencies,
+} from "./MessageProcessingProcessor.js";
+export { createMessageProcessingWorker } from "./MessageProcessingWorker.js";

@@ -11,6 +11,14 @@ export type MessageProcessingJobPayload = {
   contactPhone: string;
 };
 
+export interface MessageProcessingResult {
+  processed: boolean;
+  messageId: string;
+  conversationId: string;
+  skipped?: boolean;
+  reason?: "message_not_found" | "conversation_not_found" | "invalid_payload";
+}
+
 export interface EnqueueInboundMessageResult {
   jobId: string;
   jobName: typeof PROCESS_INBOUND_MESSAGE_JOB;

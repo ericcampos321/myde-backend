@@ -1,9 +1,10 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { Queue } from "bullmq";
 import { env } from "../../config/env.js";
 import {
   BullMqMessageProcessingQueue,
   closeMessageProcessingQueue,
+  createMessageProcessingWorker,
   MESSAGE_PROCESSING_QUEUE,
   PROCESS_INBOUND_MESSAGE_JOB,
 } from "./index.js";
@@ -63,4 +64,48 @@ describeRedis("BullMqMessageProcessingQueue", () => {
 
     await job?.remove();
   });
+
+  it("worker consome job real do redis com processor fake e fecha sem conexoes abertas", async () => {
+    const externalMessageId = `redis-worker-test-${Date.now()}`;
+    const queue = new BullMqMessageProcessingQueue();
+    const processMessageJob = vi.fn().mockResolvedValue({
+      processed: true,
+      messageId: "message-1",
+      conversationId: "conversation-1",
+    });
+    const controlledRuntime = await createMessageProcessingWorker({
+      autorun: true,
+      concurrency: 1,
+      processor: {
+        processMessageJob,
+      } as never,
+    });
+
+    await queue.enqueueInboundMessage({
+      tenantId: "tenant-1",
+      conversationId: "conversation-1",
+      messageId: "message-1",
+      externalMessageId,
+      phoneNumberId: "123456789012345",
+      contactPhone: "5511999990000",
+    });
+
+    for (let attempt = 0; attempt < 20; attempt++) {
+      if (processMessageJob.mock.calls.length > 0) break;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+
+    expect(processMessageJob).toHaveBeenCalledWith({
+      tenantId: "tenant-1",
+      conversationId: "conversation-1",
+      messageId: "message-1",
+      externalMessageId,
+      phoneNumberId: "123456789012345",
+      contactPhone: "5511999990000",
+    });
+
+    const job = await inspectionQueue?.getJob(externalMessageId);
+    await controlledRuntime.close();
+    await job?.remove();
+  }, 10000);
 });
