@@ -5,8 +5,8 @@ mensagens, processa de forma assíncrona com uma LLM e prepara a resposta IA.
 
 > Estado atual: API Fastify, webhook assinado, schema Drizzle, repositories,
 > dispatch BullMQ para mensagens inbound, worker dedicado e camada de IA com
-> `StubAiProvider`/`OpenAiProvider`. O worker ainda não envia outbound à Meta
-> neste bloco; ele apenas gera a resposta candidata.
+> `StubAiProvider`/`OpenAiProvider`. Envio outbound real de texto pela Meta
+> Graph API exposto em `POST /conversations/:conversationId/messages`.
 
 ---
 
@@ -39,7 +39,9 @@ API (npm run dev)                         Worker (npm run dev:worker)
   bootstrap/server.ts → bootstrap/app.ts    workers/message-processing/
   ├ GET /health                             ├ consome BullMQ
   ├ GET/POST /webhook                       ├ processor + services/tenant/ai
-  └ GET /conversations   (futuro)           └ shutdown gracioso
+  ├ GET /me /conversations /messages        └ shutdown gracioso
+  ├ POST /ai/suggest
+  └ POST /conversations/:id/messages ─────────────▶ Meta Graph API (outbound)
             │  enqueue jobId=externalMessageId
             ▼
      Redis / BullMQ  ──dispatch──▶  Worker
@@ -162,6 +164,26 @@ backend local:
 3. `META_APP_SECRET` valida a assinatura `X-Hub-Signature-256` de cada evento.
 
 Passo a passo completo de credenciais em [SETUP-CREDENCIAIS.md](SETUP-CREDENCIAIS.md).
+
+### Envio outbound (REST)
+
+```
+POST /conversations/:conversationId/messages
+Header:  X-Tenant-ID: <id do tenant>
+Body:    { "text": "mensagem a enviar" }
+→ 201   { id, conversationId, direction:"outbound", body, status:"sent",
+          externalMessageId, createdAt }
+```
+
+Fluxo: o backend valida a conversa/contato/tenant, chama a **Meta Graph API**
+(`POST /{phoneNumberId}/messages`) usando o `phoneNumberId` **do tenant**, e só
+então persiste a mensagem outbound (estratégia *Meta primeiro* — se a Meta falhar,
+nada é gravado). O frontend nunca chama a Meta diretamente; apenas este endpoint.
+
+> ⚠️ **`X-Tenant-ID` é uma simplificação de DEV/desafio** (não há auth). O
+> isolamento é garantido no banco — toda query filtra por `tenantId` e a conversa
+> precisa pertencer ao tenant. Em **produção**, troque o header por auth/JWT/sessão
+> e derive o tenant da identidade autenticada.
 
 ### Mock da Meta (legado/opcional — não é o ambiente padrão)
 

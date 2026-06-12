@@ -88,7 +88,7 @@ export class InboxService {
       name: tenant.name,
       role: "Inbox real",
       capabilities: {
-        sendMessage: false,
+        sendMessage: true,
         aiSuggestion: hasOpenAi,
       },
     };
