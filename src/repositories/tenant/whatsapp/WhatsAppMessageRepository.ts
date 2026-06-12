@@ -1,4 +1,4 @@
-import { and, asc, eq, isNotNull } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull } from "drizzle-orm";
 import { db, type Database } from "../../../db/client.js";
 import { whatsappMessages } from "../../../db/schema/index.js";
 import type {
@@ -69,6 +69,23 @@ export class WhatsAppMessageRepository {
         and(
           eq(whatsappMessages.tenantId, tenantId),
           eq(whatsappMessages.conversationId, conversationId)
+        )
+      )
+      .orderBy(asc(whatsappMessages.createdAt));
+  }
+
+  async findByConversationIds(tenantId: string, conversationIds: string[]) {
+    if (conversationIds.length === 0) {
+      return [];
+    }
+
+    return this.database
+      .select()
+      .from(whatsappMessages)
+      .where(
+        and(
+          eq(whatsappMessages.tenantId, tenantId),
+          inArray(whatsappMessages.conversationId, conversationIds)
         )
       )
       .orderBy(asc(whatsappMessages.createdAt));

@@ -1,0 +1,126 @@
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import type { FastifyInstance } from "fastify";
+import { buildApp } from "../../../bootstrap/app.js";
+
+let app: FastifyInstance;
+
+const inboxService = {
+  getMe: vi.fn().mockResolvedValue({
+    id: "tenant-1",
+    name: "NeoFibra",
+    role: "Inbox real",
+    capabilities: {
+      sendMessage: false,
+      aiSuggestion: true,
+    },
+  }),
+  listConversations: vi.fn().mockResolvedValue([
+    {
+      id: "conv-1",
+      contactName: "Maria",
+      contactPhone: "5511999999999",
+      avatarColor: "#2F855A",
+      unread: 0,
+      lastMessage: "Oi, preciso de ajuda",
+      lastMessageAt: "2026-06-12T12:00:00.000Z",
+    },
+  ]),
+  listMessages: vi.fn().mockResolvedValue([
+    {
+      id: "msg-1",
+      direction: "in",
+      body: "Oi, preciso de ajuda",
+      status: "sent",
+      createdAt: "2026-06-12T12:00:00.000Z",
+    },
+  ]),
+  suggestReply: vi.fn().mockResolvedValue({
+    suggestion: "Claro, posso ajudar com isso.",
+    source: "openai",
+  }),
+};
+
+beforeAll(async () => {
+  app = await buildApp({ inboxService });
+  await app.ready();
+});
+
+afterAll(async () => {
+  await app.close();
+});
+
+describe("GET /me", () => {
+  it("retorna o perfil consumido pelo frontend", async () => {
+    const res = await app.inject({ method: "GET", url: "/me" });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({
+      id: "tenant-1",
+      name: "NeoFibra",
+      role: "Inbox real",
+      capabilities: {
+        sendMessage: false,
+        aiSuggestion: true,
+      },
+    });
+  });
+});
+
+describe("GET /conversations", () => {
+  it("retorna a lista real de conversas", async () => {
+    const res = await app.inject({ method: "GET", url: "/conversations" });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual([
+      {
+        id: "conv-1",
+        contactName: "Maria",
+        contactPhone: "5511999999999",
+        avatarColor: "#2F855A",
+        unread: 0,
+        lastMessage: "Oi, preciso de ajuda",
+        lastMessageAt: "2026-06-12T12:00:00.000Z",
+      },
+    ]);
+  });
+});
+
+describe("GET /conversations/:id/messages", () => {
+  it("retorna o histórico da conversa", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: "/conversations/conv-1/messages",
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(inboxService.listMessages).toHaveBeenCalledWith("conv-1");
+    expect(res.json()).toEqual([
+      {
+        id: "msg-1",
+        direction: "in",
+        body: "Oi, preciso de ajuda",
+        status: "sent",
+        createdAt: "2026-06-12T12:00:00.000Z",
+      },
+    ]);
+  });
+});
+
+describe("POST /ai/suggest", () => {
+  it("retorna a sugestao gerada no backend", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/ai/suggest",
+      payload: {
+        conversationId: "conv-1",
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(inboxService.suggestReply).toHaveBeenCalledWith("conv-1");
+    expect(res.json()).toEqual({
+      suggestion: "Claro, posso ajudar com isso.",
+      source: "openai",
+    });
+  });
+});

@@ -1,7 +1,17 @@
 import fastifyCors from "@fastify/cors";
 import type { FastifyInstance } from "fastify";
+import { corsOrigins } from "../config/env.js";
 
-/** CORS aberto — útil para inspeção local. Restrinja por origem em produção. */
+/** CORS explícito para o frontend local e requisições sem Origin (ex.: Meta). */
 export async function registerCors(app: FastifyInstance): Promise<void> {
-  await app.register(fastifyCors, { origin: true });
+  await app.register(fastifyCors, {
+    origin(origin, callback) {
+      if (!origin) {
+        callback(null, true);
+        return;
+      }
+
+      callback(null, corsOrigins.includes(origin));
+    },
+  });
 }

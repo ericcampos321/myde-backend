@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db, type Database } from "../../../db/client.js";
 import { whatsappContacts } from "../../../db/schema/index.js";
 import type { UpsertWhatsAppContactInput } from "../../../types/tenant/whatsapp/WhatsAppContactTypes.js";
@@ -29,6 +29,22 @@ export class WhatsAppContactRepository {
       )
       .limit(1);
     return contact ?? null;
+  }
+
+  async findByIds(tenantId: string, ids: string[]) {
+    if (ids.length === 0) {
+      return [];
+    }
+
+    return this.database
+      .select()
+      .from(whatsappContacts)
+      .where(
+        and(
+          eq(whatsappContacts.tenantId, tenantId),
+          inArray(whatsappContacts.id, ids)
+        )
+      );
   }
 
   async upsertByPhone(data: UpsertWhatsAppContactInput) {

@@ -35,6 +35,9 @@ const envSchema = z.object({
   LOG_LEVEL: z
     .enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"])
     .default("info"),
+  CORS_ORIGINS: z
+    .string()
+    .default("http://localhost:3000,http://127.0.0.1:3000"),
 
   DATABASE_URL: z
     .string()
@@ -85,6 +88,9 @@ if (!parsed.success) {
 
 export const env = parsed.data;
 export type Env = typeof env;
+export const corsOrigins = env.CORS_ORIGINS.split(",")
+  .map((origin) => origin.trim())
+  .filter((origin) => origin.length > 0);
 
 /**
  * Indica se há provedor OpenAI real configurado. Sem a chave, o stub só é usado
