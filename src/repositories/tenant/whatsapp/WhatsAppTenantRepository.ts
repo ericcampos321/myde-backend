@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import { db, type Database } from "../../../db/client.js";
-import { tenants, type NewTenant } from "../../../models/db/schema.js";
+import { tenants, type NewTenantRow } from "../../../db/schema/index.js";
 import type { UpsertWhatsAppTenantInput } from "../../../types/tenant/whatsapp/WhatsAppTenantTypes.js";
 
 export class WhatsAppTenantRepository {
@@ -24,7 +24,7 @@ export class WhatsAppTenantRepository {
     return tenant ?? null;
   }
 
-  async create(data: NewTenant) {
+  async create(data: NewTenantRow) {
     const [tenant] = await this.database.insert(tenants).values(data).returning();
     return tenant;
   }

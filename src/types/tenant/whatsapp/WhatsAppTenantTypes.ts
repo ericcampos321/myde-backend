@@ -1,7 +1,7 @@
-import type { NewTenant, Tenant } from "../../../models/db/schema.js";
+import type { NewTenantRow } from "../../../db/schema/index.js";
 
-export type { NewTenant, Tenant };
+/** Entrada do use case de upsert de tenant (subconjunto da row de insert). */
 export type UpsertWhatsAppTenantInput = Pick<
-  NewTenant,
+  NewTenantRow,
   "name" | "phoneNumberId" | "wabaId"
 >;

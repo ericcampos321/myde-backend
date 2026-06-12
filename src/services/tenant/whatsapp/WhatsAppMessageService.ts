@@ -1,10 +1,10 @@
 import type { Logger } from "pino";
 import { createLogger } from "../../../shared/logger/logger.js";
 import { WhatsAppMessageRepository } from "../../../repositories/tenant/whatsapp/WhatsAppMessageRepository.js";
+import type { WhatsAppMessageRow } from "../../../db/schema/index.js";
 import type {
   CreateInboundMessageInput,
   CreateOutboundMessageInput,
-  WhatsAppMessage,
 } from "../../../types/tenant/whatsapp/WhatsAppMessageTypes.js";
 
 export interface WhatsAppMessageServiceDependencies {
@@ -22,21 +22,21 @@ export class WhatsAppMessageService {
     this.log = dependencies.log ?? createLogger({ module: "whatsapp-message" });
   }
 
-  async findById(tenantId: string, id: string): Promise<WhatsAppMessage | null> {
+  async findById(tenantId: string, id: string): Promise<WhatsAppMessageRow | null> {
     return this.messageRepository.findById(tenantId, id);
   }
 
   async findByExternalMessageId(
     tenantId: string,
     externalMessageId: string
-  ): Promise<WhatsAppMessage | null> {
+  ): Promise<WhatsAppMessageRow | null> {
     return this.messageRepository.findByExternalMessageId(
       tenantId,
       externalMessageId
     );
   }
 
-  async createInbound(input: CreateInboundMessageInput): Promise<WhatsAppMessage | undefined> {
+  async createInbound(input: CreateInboundMessageInput): Promise<WhatsAppMessageRow | undefined> {
     const message = await this.messageRepository.createInbound(input);
     if (message) {
       this.log.debug(
@@ -52,7 +52,7 @@ export class WhatsAppMessageService {
     return message;
   }
 
-  async createOutbound(input: CreateOutboundMessageInput): Promise<WhatsAppMessage | undefined> {
+  async createOutbound(input: CreateOutboundMessageInput): Promise<WhatsAppMessageRow | undefined> {
     const message = await this.messageRepository.createOutbound(input);
     if (message) {
       this.log.debug(
@@ -66,14 +66,14 @@ export class WhatsAppMessageService {
   async findByConversationId(
     tenantId: string,
     conversationId: string
-  ): Promise<WhatsAppMessage[]> {
+  ): Promise<WhatsAppMessageRow[]> {
     return this.messageRepository.findByConversationId(tenantId, conversationId);
   }
 
   async findOutboundByReplyToMessageId(
     tenantId: string,
     replyToMessageId: string
-  ): Promise<WhatsAppMessage | null> {
+  ): Promise<WhatsAppMessageRow | null> {
     return this.messageRepository.findOutboundByReplyToMessageId(
       tenantId,
       replyToMessageId

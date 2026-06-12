@@ -1,6 +1,6 @@
 import { and, asc, eq, isNotNull } from "drizzle-orm";
 import { db, type Database } from "../../../db/client.js";
-import { whatsappMessages } from "../../../models/db/schema.js";
+import { whatsappMessages } from "../../../db/schema/index.js";
 import type {
   CreateInboundMessageInput,
   CreateOutboundMessageInput,

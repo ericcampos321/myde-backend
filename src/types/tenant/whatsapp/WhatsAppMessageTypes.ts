@@ -1,8 +1,8 @@
-import type { NewWhatsAppMessage, WhatsAppMessage } from "../../../models/db/schema.js";
+import type { WhatsAppMessageRow } from "../../../db/schema/index.js";
 
-export type { NewWhatsAppMessage, WhatsAppMessage };
-export type MessageDirection = WhatsAppMessage["direction"];
+export type MessageDirection = WhatsAppMessageRow["direction"];
 
+/** Entrada do use case de criação de mensagem inbound (idempotente). */
 export interface CreateInboundMessageInput {
   tenantId: string;
   conversationId: string;
@@ -11,6 +11,7 @@ export interface CreateInboundMessageInput {
   createdAt: Date;
 }
 
+/** Entrada do use case de criação de mensagem outbound. */
 export interface CreateOutboundMessageInput {
   tenantId: string;
   conversationId: string;

@@ -1,7 +1,8 @@
 import type { Logger } from "pino";
 import { createLogger } from "../../../shared/logger/logger.js";
 import { WhatsAppContactRepository } from "../../../repositories/tenant/whatsapp/WhatsAppContactRepository.js";
-import type { UpsertWhatsAppContactInput, WhatsAppContact } from "../../../types/tenant/whatsapp/WhatsAppContactTypes.js";
+import type { WhatsAppContactRow } from "../../../db/schema/index.js";
+import type { UpsertWhatsAppContactInput } from "../../../types/tenant/whatsapp/WhatsAppContactTypes.js";
 
 export interface WhatsAppContactServiceDependencies {
   contactRepository?: WhatsAppContactRepository;
@@ -18,20 +19,20 @@ export class WhatsAppContactService {
     this.log = dependencies.log ?? createLogger({ module: "whatsapp-contact" });
   }
 
-  async findById(tenantId: string, id: string): Promise<WhatsAppContact | null> {
+  async findById(tenantId: string, id: string): Promise<WhatsAppContactRow | null> {
     return this.contactRepository.findById(tenantId, id);
   }
 
   async findByPhone(
     tenantId: string,
     phone: string
-  ): Promise<WhatsAppContact | null> {
+  ): Promise<WhatsAppContactRow | null> {
     return this.contactRepository.findByPhone(tenantId, phone);
   }
 
   async upsertByPhone(
     input: UpsertWhatsAppContactInput
-  ): Promise<WhatsAppContact | undefined> {
+  ): Promise<WhatsAppContactRow | undefined> {
     const contact = await this.contactRepository.upsertByPhone(input);
     this.log.debug(
       { tenantId: input.tenantId, phone: input.phone },

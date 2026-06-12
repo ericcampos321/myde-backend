@@ -1,6 +1,6 @@
 import { and, desc, eq } from "drizzle-orm";
 import { db, type Database } from "../../../db/client.js";
-import { whatsappConversations } from "../../../models/db/schema.js";
+import { whatsappConversations } from "../../../db/schema/index.js";
 import type { UpsertOpenConversationInput } from "../../../types/tenant/whatsapp/WhatsAppConversationTypes.js";
 
 export class WhatsAppConversationRepository {

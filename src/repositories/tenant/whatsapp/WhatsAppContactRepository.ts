@@ -1,6 +1,6 @@
 import { and, eq } from "drizzle-orm";
 import { db, type Database } from "../../../db/client.js";
-import { whatsappContacts } from "../../../models/db/schema.js";
+import { whatsappContacts } from "../../../db/schema/index.js";
 import type { UpsertWhatsAppContactInput } from "../../../types/tenant/whatsapp/WhatsAppContactTypes.js";
 
 export class WhatsAppContactRepository {

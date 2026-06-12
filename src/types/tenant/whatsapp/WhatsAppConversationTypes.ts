@@ -1,10 +1,4 @@
-import type {
-  NewWhatsAppConversation,
-  WhatsAppConversation,
-} from "../../../models/db/schema.js";
-
-export type { NewWhatsAppConversation, WhatsAppConversation };
-
+/** Entrada do use case de upsert de conversa aberta. */
 export interface UpsertOpenConversationInput {
   tenantId: string;
   contactId: string;

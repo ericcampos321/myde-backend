@@ -1,11 +1,7 @@
-import type {
-  NewWhatsAppContact,
-  WhatsAppContact,
-} from "../../../models/db/schema.js";
+import type { NewWhatsAppContactRow } from "../../../db/schema/index.js";
 
-export type { NewWhatsAppContact, WhatsAppContact };
-
+/** Entrada do use case de upsert de contato (subconjunto da row de insert). */
 export type UpsertWhatsAppContactInput = Pick<
-  NewWhatsAppContact,
+  NewWhatsAppContactRow,
   "tenantId" | "phone" | "name"
 >;

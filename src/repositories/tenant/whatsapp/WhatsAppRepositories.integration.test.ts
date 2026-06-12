@@ -6,7 +6,7 @@ import {
   whatsappContacts,
   whatsappConversations,
   whatsappMessages,
-} from "../../../models/db/schema.js";
+} from "../../../db/schema/index.js";
 import { WhatsAppContactRepository } from "./index.js";
 import { WhatsAppConversationRepository } from "./index.js";
 import { WhatsAppMessageRepository } from "./index.js";

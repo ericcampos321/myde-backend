@@ -5,13 +5,13 @@ import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { buildApp } from "../../../bootstrap/app.js";
 import { env } from "../../../config/env.js";
-import * as schema from "../../../models/db/schema.js";
+import * as schema from "../../../db/schema/index.js";
 import {
   tenants,
   whatsappContacts,
   whatsappConversations,
   whatsappMessages,
-} from "../../../models/db/schema.js";
+} from "../../../db/schema/index.js";
 import { hmacSha256Hex } from "../../../shared/utils/crypto.js";
 import { WhatsAppContactRepository } from "../../../repositories/tenant/whatsapp/index.js";
 import { WhatsAppConversationRepository } from "../../../repositories/tenant/whatsapp/index.js";

@@ -60,10 +60,9 @@ src/
     tenant/whatsapp/  tenant/ai/  tenant/message-processing/
   repositories/   acesso a dados (Drizzle), isolado por tenantId
     tenant/whatsapp/
-  schemas/        contratos Zod de entrada/saída por domínio
-  types/          DTOs e tipos por domínio (tenant/whatsapp, tenant/ai)
-  models/db/      schema Drizzle (fonte dos tipos de tabela)
-  db/             client.ts, migrations/, seeds/
+  schemas/        validação runtime Zod (request, payload Meta, etc.)
+  types/          contratos TS sem runtime (não vindos de Drizzle nem Zod)
+  db/             schema/ (Drizzle por domínio + Row types), client.ts, migrations/, seeds/
   queues/         BullMQ Queue (enqueue idempotente por jobId)
   workers/        processo dedicado: bootstrap, eventos, shutdown
   clients/        contratos de integrações externas (meta/)
@@ -75,6 +74,24 @@ src/
 Regras de dependência: controller → service → repository/queue. Controller não
 importa repository nem queue; worker chama o processor (service); repository só
 conhece o banco.
+
+### Fronteiras de schema e tipo
+
+- **`db/schema/`** — schema físico Drizzle dividido por domínio
+  (`tenant/tenants.schema.ts`, `whatsapp/whatsappContacts.schema.ts`, etc.),
+  reexportado pelo barrel `db/schema/index.ts`. É a única fonte dos tipos de
+  tabela, exportados como `TenantRow`/`NewTenantRow`, `WhatsAppContactRow`, etc.
+  O `drizzle-kit` lê os arquivos via `tsx` (scripts `db:generate`/`db:migrate`),
+  pois resolve os imports `.js` entre os arquivos de schema do NodeNext.
+- **`schemas/**`** — apenas validação runtime (Zod ou JSON-schema Fastify):
+  request body, params, query, payload externo da Meta, payload de fila,
+  resposta pública. Pode exportar o tipo via `z.infer`.
+- **`types/**`** — apenas contratos TS que não vêm do Drizzle nem do Zod
+  (ex.: `Upsert*Input` derivado de `New*Row`, contratos do webhook Meta).
+- **DTO** — criado só quando a resposta pública difere da row do banco;
+  preferir `ResponseSchema` + `z.infer`. Sem pasta global `dtos/`.
+- **Repositories** retornam rows do Drizzle; **services** recebem inputs de
+  `schemas`/`types` e retornam row ou DTO explícito.
 
 ---
 
@@ -113,7 +130,7 @@ npm test
 
 ### Banco de dados
 
-O schema Drizzle fica em `src/models/db/schema.ts` e as migrations em
+O schema Drizzle fica em `src/db/schema.ts` e as migrations em
 `src/db/migrations/`. O seed explícito cria ou atualiza o tenant padrão
 **NeoFibra** usando `META_PHONE_NUMBER_ID`; ele não roda no startup da API.
 
