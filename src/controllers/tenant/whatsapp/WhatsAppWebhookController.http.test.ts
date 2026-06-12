@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { buildApp } from "../../../bootstrap/app.js";
+import { env } from "../../../config/env.js";
 import { hmacSha256Hex } from "../../../shared/utils/crypto.js";
 
 let app: FastifyInstance;
@@ -39,10 +40,8 @@ const metaPayload = {
   ],
 };
 
-const appSecret =
-  process.env.META_APP_SECRET ?? "super-secret-app-secret-trocar";
-const verifyToken =
-  process.env.META_VERIFY_TOKEN ?? "meu-verify-token-secreto";
+const appSecret = env.META_APP_SECRET;
+const verifyToken = env.META_VERIFY_TOKEN;
 
 function signPayload(rawBody: string | Buffer): string {
   return hmacSha256Hex(

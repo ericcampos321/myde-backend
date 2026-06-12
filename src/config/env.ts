@@ -33,7 +33,15 @@ const envSchema = z.object({
   OPENAI_MODEL: z.string().min(1).default("gpt-4o-mini"),
 });
 
-const parsed = envSchema.safeParse(process.env);
+// Valores em branco no .env (ex.: copiado do .env.example) são tratados como
+// ausência, deixando os defaults locais/test serem aplicados em vez de quebrar
+// o boot. Credenciais reais devem ser preenchidas no .env local.
+const normalizedEnv: Record<string, string | undefined> = {};
+for (const [key, value] of Object.entries(process.env)) {
+  normalizedEnv[key] = value === "" ? undefined : value;
+}
+
+const parsed = envSchema.safeParse(normalizedEnv);
 
 if (!parsed.success) {
   const issues = parsed.error.issues
@@ -45,5 +53,9 @@ if (!parsed.success) {
 export const env = parsed.data;
 export type Env = typeof env;
 
-/** Indica se há provedor OpenAI real configurado (senão, usa StubAiProvider). */
+/**
+ * Indica se há provedor OpenAI real configurado. Sem a chave, o stub só é usado
+ * em NODE_ENV=test; em dev/prod a criação do provider falha de forma explícita
+ * (ver `selectAiProviderKind`).
+ */
 export const hasOpenAi = Boolean(env.OPENAI_API_KEY && env.OPENAI_API_KEY.length > 0);

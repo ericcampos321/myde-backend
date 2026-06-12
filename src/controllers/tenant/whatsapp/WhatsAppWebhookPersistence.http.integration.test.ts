@@ -29,8 +29,7 @@ const marker = `webhook-test-${Date.now()}`;
 const phoneNumberId = `${marker}-phone-number`;
 const unknownPhoneNumberId = `${marker}-unknown-phone-number`;
 const contactPhone = "5511977770000";
-const appSecret =
-  process.env.META_APP_SECRET ?? "super-secret-app-secret-trocar";
+const appSecret = env.META_APP_SECRET;
 
 const sql = postgres(env.DATABASE_URL, { max: 2 });
 const database = drizzle(sql, { schema });

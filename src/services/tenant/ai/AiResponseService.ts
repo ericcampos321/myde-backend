@@ -1,4 +1,4 @@
-import { hasOpenAi } from "../../../config/env.js";
+import { env, hasOpenAi } from "../../../config/env.js";
 import type {
   AiConversationTurn,
   AiProviderResult,
@@ -38,43 +38,56 @@ export class AiResponseService {
   }
 
   async generateResponse(input: AiResponseInput): Promise<AiResponseResult> {
-    const knowledgeBaseContext =
-      await this.dependencies.knowledgeBaseService.getContext();
+    const knowledgeBaseContext = await this.dependencies.knowledgeBaseService.getContext();
 
     return this.dependencies.provider.generateReply({
       systemPrompt: this.systemPrompt,
       knowledgeBaseContext,
-      conversationHistory: limitConversationHistory(
-        input.conversationHistory,
-        this.historyLimit
-      ),
+      conversationHistory: limitConversationHistory(input.conversationHistory, this.historyLimit),
       userMessage: input.currentMessage,
     });
   }
 }
 
-export function createAiResponseService(
-  dependencies: AiResponseServiceDependencies = {}
-): AiResponseService {
+export function createAiResponseService(dependencies: AiResponseServiceDependencies = {}): AiResponseService {
   const provider = dependencies.provider ?? createAiProvider();
 
   return new AiResponseService({
     provider,
-    knowledgeBaseService:
-      dependencies.knowledgeBaseService ?? new KnowledgeBaseService(),
+    knowledgeBaseService: dependencies.knowledgeBaseService ?? new KnowledgeBaseService(),
     historyLimit: dependencies.historyLimit ?? DEFAULT_HISTORY_LIMIT,
     systemPrompt: dependencies.systemPrompt ?? DEFAULT_SYSTEM_PROMPT,
   });
 }
 
-export function createAiProvider(): AiProvider {
-  return hasOpenAi ? new OpenAiProvider() : new StubAiProvider();
+/**
+ * Decide qual provider de IA usar. Função pura (sem instanciar providers) para
+ * ser testável. Sem `OPENAI_API_KEY`, o stub só é aceitável em `NODE_ENV=test`;
+ * em desenvolvimento/produção falhamos de forma explícita em vez de mascarar a
+ * ausência da chave real com um mock silencioso.
+ */
+export function selectAiProviderKind(params: { hasOpenAiKey: boolean; nodeEnv: string }): "openai" | "stub" {
+  if (params.hasOpenAiKey) {
+    return "openai";
+  }
+  if (params.nodeEnv === "test") {
+    return "stub";
+  }
+  throw new Error(
+    "[ai] OPENAI_API_KEY ausente. Configure a chave real no .env local para " +
+      "habilitar as respostas de IA. O StubAiProvider só é usado em NODE_ENV=test."
+  );
 }
 
-function limitConversationHistory(
-  history: AiResponseConversationMessage[],
-  historyLimit: number
-): AiConversationTurn[] {
+export function createAiProvider(): AiProvider {
+  const kind = selectAiProviderKind({
+    hasOpenAiKey: hasOpenAi,
+    nodeEnv: env.NODE_ENV,
+  });
+  return kind === "openai" ? new OpenAiProvider() : new StubAiProvider();
+}
+
+function limitConversationHistory(history: AiResponseConversationMessage[], historyLimit: number): AiConversationTurn[] {
   return history
     .filter((message) => message.body.trim().length > 0)
     .slice(-historyLimit)

@@ -18,7 +18,7 @@ mensagens, processa de forma assíncrona com uma LLM e prepara a resposta IA.
 | Persistência | PostgreSQL + Drizzle ORM |
 | Fila | Redis + BullMQ |
 | Worker | Processo dedicado, separado da API |
-| IA | OpenAI atrás de interface, com Stub provider sem `OPENAI_API_KEY` |
+| IA | OpenAI atrás de interface (`OpenAiProvider`); stub apenas em `NODE_ENV=test` |
 | Logs | Pino (estruturado) |
 | Testes | Vitest |
 
@@ -98,21 +98,20 @@ conhece o banco.
 ## Como rodar
 
 > **Portas locais:** Postgres `5432`, **Redis `6380`** (externo — mapeado para
-> `6379` dentro do Docker, evitando conflito com Redis de outros projetos),
-> mock-meta `8001`.
+> `6379` dentro do Docker, evitando conflito com Redis de outros projetos).
 
-### Fluxo local (desenvolvimento com mock)
+### Fluxo local
 
 ```bash
-# 1. Copiar template de variáveis de ambiente
+# 1. Variáveis de ambiente: copie o template e edite o .env com credenciais reais
 cp .env.example .env
+#   → edite o .env e preencha OPENAI_API_KEY e as variáveis META_* (ver abaixo)
 
 # 2. Dependências
 npm install
 
-# 3. Infra local (Postgres, Redis, mock-meta)
-docker compose up -d postgres redis mock-meta
-curl http://localhost:8001/health   # mock da Meta
+# 3. Infra local (Postgres + Redis)
+docker compose up -d postgres redis
 
 # 4. Migrações e seed
 npm run db:migrate
@@ -126,30 +125,38 @@ curl http://localhost:8000/health   # → { "ok": true, "service": "myde-backend
 npm run dev:worker
 ```
 
-Quando o worker sobe, ele registra qual provider de IA está ativo:
-`stub` quando `OPENAI_API_KEY` não está configurada e `openai` quando a chave
-existe.
-
 ### Variáveis de ambiente
 
-- **Fluxo recomendado:** copiar `.env.example` → `.env` (local, não versionado).
-- **`.env.example`** é o template seguro, com segredos em branco. Vai para git.
+- **`.env.example`** é o template seguro, com credenciais **em branco**. Vai para git.
 - **`.env`** é o arquivo real que o app lê (via `dotenv/config` em `src/config/env.ts`).
-  Está no `.gitignore` — nunca commite.
-- **Defaults** em `src/config/env.ts`: fallback coerente, mas o fluxo documentado
-  principal usa `.env` para máxima clareza.
+  Está no `.gitignore` — **nunca commite**.
 
-#### Para desenvolvimento com Meta real ou OpenAI:
+Para os **fluxos reais** de IA e Meta, preencha no `.env` local:
 
-Editar `.env` localmente (não commitar):
-```env
-OPENAI_API_KEY=sk-...             # sua chave real
-META_TOKEN=EAAx...                # seu token real
-META_APP_SECRET=abc123...         # seu secret real
-META_API_BASE_URL=https://graph.facebook.com/v20.0
+| Variável | Necessária para |
+|---|---|
+| `OPENAI_API_KEY` | Gerar respostas de IA reais (`OpenAiProvider`) |
+| `META_VERIFY_TOKEN` | Handshake de verificação do webhook |
+| `META_APP_SECRET` | Validar a assinatura `X-Hub-Signature-256` dos webhooks |
+| `META_TOKEN` | Enviar mensagens via Graph API (outbound futuro) |
+| `META_PHONE_NUMBER_ID` | Identificar o número de origem |
+
+- Sem `OPENAI_API_KEY`, o worker **falha com erro de configuração explícito** em
+  desenvolvimento/produção (o `StubAiProvider` só é usado em `NODE_ENV=test`).
+- Sem as variáveis `META_*` reais, a validação de assinatura do webhook recusa as
+  chamadas da Meta — os fluxos reais ficam indisponíveis até serem configurados.
+- **Segredos nunca devem ir para o git.** O `.gitignore` protege `.env`.
+
+### Mock da Meta (opcional, só para testes manuais)
+
+O `docker-compose.yml` inclui um serviço `mock-meta` (porta `8001`) que simula a
+Graph API para testes locais **sem** a Meta real. Não faz parte do fluxo padrão.
+Para usá-lo, suba-o explicitamente e aponte o `.env` para ele:
+
+```bash
+docker compose up -d mock-meta
+# no .env:  META_API_BASE_URL=http://localhost:8001
 ```
-
-**Segredos nunca devem ir para o git.** O `.gitignore` protege `.env`.
 
 ### Validação
 
@@ -183,11 +190,13 @@ parte da solução.
 
 ### IA e knowledge base
 
-O provider é selecionado por factory:
+O provider é selecionado por factory (`selectAiProviderKind` / `createAiProvider`):
 
-- Sem `OPENAI_API_KEY`: usa `StubAiProvider`, determinístico e seguro para
-  desenvolvimento/testes.
 - Com `OPENAI_API_KEY`: usa `OpenAiProvider` com `OPENAI_MODEL`.
+- Sem `OPENAI_API_KEY` em `NODE_ENV=test`: usa `StubAiProvider`, determinístico
+  para os testes (não faz chamadas externas).
+- Sem `OPENAI_API_KEY` em desenvolvimento/produção: **falha com erro de
+  configuração explícito** — a ausência da chave real não é mascarada por mock.
 
 A base de conhecimento fica em `knowledge-base/` e hoje é pequena o suficiente
 para ser carregada inteira em memória e enviada como contexto bruto para o
@@ -217,11 +226,9 @@ mas ainda não persiste mensagem outbound nem chama a Meta para envio.
 ## Variáveis de ambiente
 
 Todas validadas em `src/config/env.ts` (única leitura de `process.env`).
-Os defaults sobem o ambiente local/mock (Redis na `6380`); o `.env.example`
-documenta o setup real com os segredos em branco. Sobrescreva via `.env` local
-(gitignored) — nunca commite segredos.
+O `.env.example` é o template com os segredos em branco; o setup real é preenchido
+no `.env` local (gitignored) — nunca commite segredos.
 
 `NODE_ENV`, `PORT` (8000), `HOST` (0.0.0.0), `LOG_LEVEL`, `DATABASE_URL`,
 `REDIS_URL`, `META_VERIFY_TOKEN`, `META_APP_SECRET`, `META_TOKEN`,
-`META_API_BASE_URL`, `META_PHONE_NUMBER_ID`, `OPENAI_API_KEY` (opcional),
-`OPENAI_MODEL`.
+`META_API_BASE_URL`, `META_PHONE_NUMBER_ID`, `OPENAI_API_KEY`, `OPENAI_MODEL`.

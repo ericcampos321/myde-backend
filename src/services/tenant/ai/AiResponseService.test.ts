@@ -1,6 +1,35 @@
 import { describe, expect, it, vi } from "vitest";
-import { AiResponseService } from "./AiResponseService.js";
+import { AiResponseService, selectAiProviderKind } from "./AiResponseService.js";
 import type { AiProvider } from "./providers/AiProvider.js";
+
+describe("selectAiProviderKind", () => {
+  it("usa openai quando há OPENAI_API_KEY (qualquer ambiente)", () => {
+    expect(
+      selectAiProviderKind({ hasOpenAiKey: true, nodeEnv: "development" })
+    ).toBe("openai");
+    expect(
+      selectAiProviderKind({ hasOpenAiKey: true, nodeEnv: "production" })
+    ).toBe("openai");
+  });
+
+  it("usa stub apenas em test quando não há chave", () => {
+    expect(
+      selectAiProviderKind({ hasOpenAiKey: false, nodeEnv: "test" })
+    ).toBe("stub");
+  });
+
+  it("falha explícito sem chave em desenvolvimento", () => {
+    expect(() =>
+      selectAiProviderKind({ hasOpenAiKey: false, nodeEnv: "development" })
+    ).toThrowError(/OPENAI_API_KEY ausente/);
+  });
+
+  it("falha explícito sem chave em produção", () => {
+    expect(() =>
+      selectAiProviderKind({ hasOpenAiKey: false, nodeEnv: "production" })
+    ).toThrowError(/OPENAI_API_KEY ausente/);
+  });
+});
 
 describe("AiResponseService", () => {
   it("converte history inbound/outbound para user/assistant e usa provider injetado", async () => {

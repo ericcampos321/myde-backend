@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
+import { env } from "../../../config/env.js";
 import { hmacSha256Hex } from "../../../shared/utils/crypto.js";
 import { WhatsAppSignatureService } from "./WhatsAppSignatureService.js";
 
 describe("WhatsAppSignatureService", () => {
   const signatureService = new WhatsAppSignatureService();
-  const secret = process.env.META_APP_SECRET ?? "super-secret-app-secret-trocar";
+  // Mesma fonte que o serviço valida, alinhando assinatura e verificação.
+  const secret = env.META_APP_SECRET;
 
   it("aceita assinatura valida para o raw body exato", () => {
     const rawBody = Buffer.from('{"object":"whatsapp_business_account"}');
