@@ -1,10 +1,12 @@
 # myde-backend
 
 Backend de **Atendimento WhatsApp com IA** — recebe webhooks da Meta, persiste
-mensagens, processa de forma assíncrona com uma LLM e responde via Meta API (mock).
+mensagens, processa de forma assíncrona com uma LLM e prepara a resposta IA.
 
-> Estado atual: API Fastify, webhook assinado, schema Drizzle, repositories e
-> dispatch BullMQ para mensagens inbound. Worker real e OpenAI entram depois.
+> Estado atual: API Fastify, webhook assinado, schema Drizzle, repositories,
+> dispatch BullMQ para mensagens inbound, worker dedicado e camada de IA com
+> `StubAiProvider`/`OpenAiProvider`. O worker ainda não envia outbound à Meta
+> neste bloco; ele apenas gera a resposta candidata.
 
 ---
 
@@ -36,7 +38,7 @@ clientes. Eventos sem mensagem de texto também são aceitos e ignorados.
 API (npm run dev)                         Worker (npm run dev:worker)
   bootstrap/server.ts → bootstrap/app.ts    tenant/message-processing/
   ├ GET /health                             ├ consumira BullMQ (commit futuro)
-  ├ GET/POST /webhook                       ├ processor puro
+  ├ GET/POST /webhook                       ├ processor + ai-responses/
   └ GET /conversations   (futuro)           └ shutdown gracioso
             │  enqueue jobId=externalMessageId
             ▼
@@ -93,6 +95,10 @@ curl http://localhost:8000/health   # → { "ok": true, "service": "myde-backend
 npm run dev:worker
 ```
 
+Quando o worker sobe, ele registra qual provider de IA está ativo:
+`stub` quando `OPENAI_API_KEY` não está configurada e `openai` quando a chave
+existe.
+
 ### Validação
 
 ```bash
@@ -122,6 +128,22 @@ RUN_REDIS_TESTS=true npm test
 PostgreSQL permanece a fonte da verdade. Redis/BullMQ será adicionado apenas
 como dispatch idempotente por `externalMessageId`; SQS e LocalStack não fazem
 parte da solução.
+
+### IA e knowledge base
+
+O provider é selecionado por factory:
+
+- Sem `OPENAI_API_KEY`: usa `StubAiProvider`, determinístico e seguro para
+  desenvolvimento/testes.
+- Com `OPENAI_API_KEY`: usa `OpenAiProvider` com `OPENAI_MODEL`.
+
+A base de conhecimento fica em `knowledge-base/` e hoje é pequena o suficiente
+para ser carregada inteira em memória e enviada como contexto bruto para o
+provider. Não há RAG vetorial nesta fase; isso pode entrar depois se a base
+crescer.
+
+Neste bloco o worker gera `aiResponseText`/`aiSource` durante o processamento,
+mas ainda não persiste mensagem outbound nem chama a Meta para envio.
 
 ---
 

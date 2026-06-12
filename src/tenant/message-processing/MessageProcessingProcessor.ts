@@ -1,5 +1,9 @@
 import type { Logger } from "pino";
 import { createLogger } from "../../shared/logger/logger.js";
+import {
+  AiResponseService,
+  createAiResponseService,
+} from "../ai-responses/index.js";
 import { WhatsAppConversationRepository } from "../whatsapp-conversations/index.js";
 import { WhatsAppMessageRepository } from "../whatsapp-messages/index.js";
 import type {
@@ -8,8 +12,12 @@ import type {
 } from "./MessageProcessingQueueTypes.js";
 
 export interface MessageProcessingProcessorDependencies {
-  messageRepository?: Pick<WhatsAppMessageRepository, "findById">;
+  messageRepository?: Pick<
+    WhatsAppMessageRepository,
+    "findById" | "findByConversationId"
+  >;
   conversationRepository?: Pick<WhatsAppConversationRepository, "findById">;
+  aiResponseService?: Pick<AiResponseService, "generateResponse">;
   log?: Logger;
 }
 
@@ -66,12 +74,30 @@ export class MessageProcessingProcessor {
       };
     }
 
+    const conversationMessages =
+      await this.dependencies.messageRepository.findByConversationId(
+        payload.tenantId,
+        payload.conversationId
+      );
+    const aiResponse = await this.dependencies.aiResponseService.generateResponse(
+      {
+        currentMessage: message.body,
+        conversationHistory: conversationMessages
+          .filter((conversationMessage) => conversationMessage.id !== message.id)
+          .map((conversationMessage) => ({
+            direction: conversationMessage.direction,
+            body: conversationMessage.body,
+          })),
+      }
+    );
+
     this.dependencies.log.info(
       {
         tenantId: payload.tenantId,
         conversationId: payload.conversationId,
         messageId: payload.messageId,
         externalMessageId: payload.externalMessageId,
+        aiSource: aiResponse.source,
       },
       "message processing job handled"
     );
@@ -80,6 +106,8 @@ export class MessageProcessingProcessor {
       processed: true,
       messageId: message.id,
       conversationId: conversation.id,
+      aiResponseText: aiResponse.text,
+      aiSource: aiResponse.source,
     };
   }
 }
@@ -92,6 +120,8 @@ export function createMessageProcessingProcessor(
       dependencies.messageRepository ?? new WhatsAppMessageRepository(),
     conversationRepository:
       dependencies.conversationRepository ?? new WhatsAppConversationRepository(),
+    aiResponseService:
+      dependencies.aiResponseService ?? createAiResponseService(),
     log:
       dependencies.log ??
       createLogger({ module: "message-processing-processor" }),

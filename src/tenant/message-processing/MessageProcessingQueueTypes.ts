@@ -15,6 +15,8 @@ export interface MessageProcessingResult {
   processed: boolean;
   messageId: string;
   conversationId: string;
+  aiResponseText?: string;
+  aiSource?: "openai" | "stub";
   skipped?: boolean;
   reason?: "message_not_found" | "conversation_not_found" | "invalid_payload";
 }

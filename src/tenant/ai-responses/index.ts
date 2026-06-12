@@ -1,8 +1,12 @@
 export type {
   AiSource,
-  AiTurn,
-  GenerateReplyInput,
-  GenerateReplyResult,
+  AiConversationTurn,
+  AiProviderInput,
+  AiProviderResult,
+  AiResponseConversationMessage,
+  AiResponseInput,
+  AiResponseResult,
+  KnowledgeBaseDocument,
 } from "./AiTypes.js";
 export type { AiProvider } from "./providers/AiProvider.js";
 export * from "./AiResponseService.js";

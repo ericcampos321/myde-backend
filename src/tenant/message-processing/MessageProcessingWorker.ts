@@ -8,6 +8,7 @@ import { pathToFileURL } from "node:url";
 import { env } from "../../config/env.js";
 import { closeDb } from "../../db/client.js";
 import { createLogger } from "../../shared/logger/logger.js";
+import { createAiResponseService } from "../ai-responses/index.js";
 import {
   MessageProcessingProcessor,
   createMessageProcessingProcessor,
@@ -94,6 +95,7 @@ export async function createMessageProcessingWorker(
         messageId: job.data.messageId,
         externalMessageId: job.data.externalMessageId,
         processed: result.processed,
+        aiSource: result.aiSource,
         skipped: result.skipped,
         reason: result.reason,
       },
@@ -134,15 +136,19 @@ export async function createMessageProcessingWorker(
 
 async function bootstrap(): Promise<void> {
   const log = createLogger({ module: "worker", queue: MESSAGE_PROCESSING_QUEUE });
+  const aiResponseService = createAiResponseService();
   log.info(
     {
       jobName: PROCESS_INBOUND_MESSAGE_JOB,
       concurrency: 5,
+      aiProvider: aiResponseService.source,
     },
     "worker de processamento iniciado"
   );
 
-  const runtime = await createMessageProcessingWorker();
+  const runtime = await createMessageProcessingWorker({
+    aiResponseService,
+  });
 
   installWorkerShutdown(log, async () => {
     await runtime.close();
