@@ -18,6 +18,8 @@ import {
 } from "./WhatsAppMessageService.js";
 import { WhatsAppPayloadMapper } from "./WhatsAppPayloadMapper.js";
 import { WhatsAppSignatureService } from "./WhatsAppSignatureService.js";
+import { TenantResolutionPolicy } from "../../../policies/tenant/index.js";
+import { WebhookDeliveryPolicy } from "../../../policies/webhook/index.js";
 import type {
   MetaWebhookAckResponse,
   MetaWebhookHeaders,
@@ -28,6 +30,7 @@ export interface WhatsAppWebhookServiceDependencies {
   signatureService?: WhatsAppSignatureService;
   payloadMapper?: WhatsAppPayloadMapper;
   tenantService?: WhatsAppTenantService;
+  tenantResolutionPolicy?: TenantResolutionPolicy;
   contactService?: WhatsAppContactService;
   messageService?: WhatsAppMessageService;
   conversationRepository?: WhatsAppConversationRepository;
@@ -39,6 +42,7 @@ export class WhatsAppWebhookService {
   private readonly signatureService: WhatsAppSignatureService;
   private readonly payloadMapper: WhatsAppPayloadMapper;
   private readonly tenantService: WhatsAppTenantService;
+  private readonly tenantResolutionPolicy: TenantResolutionPolicy;
   private readonly contactService: WhatsAppContactService;
   private readonly messageService: WhatsAppMessageService;
   private readonly conversationRepository: WhatsAppConversationRepository;
@@ -51,6 +55,9 @@ export class WhatsAppWebhookService {
     this.payloadMapper = dependencies.payloadMapper ?? new WhatsAppPayloadMapper();
     this.tenantService =
       dependencies.tenantService ?? new WhatsAppTenantService();
+    this.tenantResolutionPolicy =
+      dependencies.tenantResolutionPolicy ??
+      new TenantResolutionPolicy({ tenantService: this.tenantService });
     this.contactService =
       dependencies.contactService ?? new WhatsAppContactService();
     this.messageService =
@@ -97,28 +104,33 @@ export class WhatsAppWebhookService {
     const mapped = this.payloadMapper.map(params.payload);
     if (mapped.kind === "ignored") {
       this.log.warn({ reason: mapped.reason }, "webhook event ignored");
-      return { received: true, ignored: true, reason: mapped.reason };
+      return WebhookDeliveryPolicy.ignoredUnsupportedEvent();
     }
 
     const inbound = mapped.message;
-    const tenant = await this.tenantService.resolveByPhoneNumberId(
+    const resolution = await this.tenantResolutionPolicy.resolveByPhoneNumberId(
       inbound.phoneNumberId
     );
-    if (!tenant) {
+    if (resolution.status !== "found") {
       // A Meta recebe 200 para evitar retries infinitos de um tenant não configurado.
       this.log.warn(
-        { phoneNumberId: inbound.phoneNumberId, wabaId: inbound.wabaId },
+        {
+          phoneNumberId: inbound.phoneNumberId,
+          wabaId: inbound.wabaId,
+          resolution: resolution.status,
+        },
         "webhook ignored for unknown tenant"
       );
-      return { received: true, ignored: true, reason: "unknown_tenant" };
+      return WebhookDeliveryPolicy.ignoredUnknownTenant();
     }
+    const tenant = resolution.tenant;
 
     const existingMessage = await this.messageService.findByExternalMessageId(
       tenant.id,
       inbound.externalMessageId
     );
     if (existingMessage) {
-      return { received: true, persisted: false, duplicated: true };
+      return WebhookDeliveryPolicy.duplicated();
     }
 
     const contact = await this.contactService.upsertByPhone({
@@ -164,7 +176,7 @@ export class WhatsAppWebhookService {
     });
 
     if (!message) {
-      return { received: true, persisted: false, duplicated: true };
+      return WebhookDeliveryPolicy.duplicated();
     }
 
     try {
@@ -190,6 +202,6 @@ export class WhatsAppWebhookService {
       throw error;
     }
 
-    return { received: true, persisted: true, duplicated: false };
+    return WebhookDeliveryPolicy.persisted();
   }
 }
