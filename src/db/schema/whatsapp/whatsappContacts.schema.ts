@@ -3,6 +3,7 @@ import {
   pgTable,
   text,
   timestamp,
+  unique,
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
@@ -30,6 +31,9 @@ export const whatsappContacts = pgTable(
       table.phone
     ),
     index("whatsapp_contacts_tenant_id_idx").on(table.tenantId),
+    // Alvo de FK composta: garante que (id, tenantId) é único, permitindo que
+    // conversas referenciem o contato amarrando o tenant no nível do banco.
+    unique("whatsapp_contacts_id_tenant_unique").on(table.id, table.tenantId),
   ]
 );
 

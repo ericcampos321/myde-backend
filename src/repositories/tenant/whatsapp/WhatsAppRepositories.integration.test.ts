@@ -147,3 +147,137 @@ describeDatabase("repositories com PostgreSQL", () => {
     expect(duplicate).toBeUndefined();
   });
 });
+
+describeDatabase("travas multi-tenant no banco", () => {
+  it("dois tenants podem ter o mesmo phone de contato sem conflito", async () => {
+    const tenantA = await createTenant();
+    const tenantB = await createTenant();
+    const phone = "5511900000010";
+
+    const contactA = await contactRepository.upsertByPhone({
+      tenantId: tenantA.id,
+      phone,
+      name: "Contato A",
+    });
+    const contactB = await contactRepository.upsertByPhone({
+      tenantId: tenantB.id,
+      phone,
+      name: "Contato B",
+    });
+
+    expect(contactA?.id).toBeDefined();
+    expect(contactB?.id).toBeDefined();
+    expect(contactA?.id).not.toBe(contactB?.id);
+  });
+
+  it("mesmo tenant nao pode duplicar phone de contato (unique tenantId+phone)", async () => {
+    const tenant = await createTenant();
+    const phone = "5511900000011";
+
+    await db
+      .insert(whatsappContacts)
+      .values({ tenantId: tenant.id, phone, name: "Primeiro" });
+
+    await expect(
+      db
+        .insert(whatsappContacts)
+        .values({ tenantId: tenant.id, phone, name: "Segundo" })
+    ).rejects.toThrow();
+  });
+
+  it("dois tenants podem ter o mesmo externalMessageId sem conflito", async () => {
+    const a = await createConversation();
+    const b = await createConversation();
+    const externalMessageId = `${marker}-shared-ext`;
+
+    const messageA = await messageRepository.createInbound({
+      tenantId: a.tenant.id,
+      conversationId: a.conversation.id,
+      body: "A",
+      externalMessageId,
+      createdAt: new Date(),
+    });
+    const messageB = await messageRepository.createInbound({
+      tenantId: b.tenant.id,
+      conversationId: b.conversation.id,
+      body: "B",
+      externalMessageId,
+      createdAt: new Date(),
+    });
+
+    expect(messageA?.id).toBeDefined();
+    expect(messageB?.id).toBeDefined();
+    expect(messageA?.id).not.toBe(messageB?.id);
+  });
+
+  it("mesmo tenant nao pode duplicar externalMessageId (unique parcial)", async () => {
+    const { tenant, conversation } = await createConversation();
+    const base = {
+      tenantId: tenant.id,
+      conversationId: conversation.id,
+      direction: "inbound" as const,
+      body: "x",
+      status: "received",
+      externalMessageId: `${marker}-dup-ext`,
+    };
+
+    await db.insert(whatsappMessages).values(base);
+
+    await expect(
+      db.insert(whatsappMessages).values({ ...base })
+    ).rejects.toThrow();
+  });
+
+  it("mesmo tenant nao pode duplicar replyToMessageId (unique parcial)", async () => {
+    const { tenant, conversation } = await createConversation();
+    const replied = await messageRepository.createInbound({
+      tenantId: tenant.id,
+      conversationId: conversation.id,
+      body: "Pergunta",
+      externalMessageId: `${marker}-reply-base`,
+      createdAt: new Date(),
+    });
+    const outbound = {
+      tenantId: tenant.id,
+      conversationId: conversation.id,
+      direction: "outbound" as const,
+      body: "Resposta",
+      status: "sent",
+      replyToMessageId: replied!.id,
+    };
+
+    await db.insert(whatsappMessages).values(outbound);
+
+    await expect(
+      db.insert(whatsappMessages).values({ ...outbound })
+    ).rejects.toThrow();
+  });
+
+  it("conversa do tenant A nao pode apontar para contato do tenant B (FK composta)", async () => {
+    const tenantA = await createTenant();
+    const b = await createConversation();
+
+    await expect(
+      db.insert(whatsappConversations).values({
+        tenantId: tenantA.id,
+        contactId: b.contact.id,
+      })
+    ).rejects.toThrow();
+  });
+
+  it("mensagem do tenant A nao pode apontar para conversa do tenant B (FK composta)", async () => {
+    const tenantA = await createTenant();
+    const b = await createConversation();
+
+    await expect(
+      db.insert(whatsappMessages).values({
+        tenantId: tenantA.id,
+        conversationId: b.conversation.id,
+        direction: "inbound",
+        body: "cross-tenant",
+        status: "received",
+        externalMessageId: `${marker}-cross-tenant`,
+      })
+    ).rejects.toThrow();
+  });
+});

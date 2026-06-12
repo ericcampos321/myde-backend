@@ -8,6 +8,13 @@
       "when": 1781237207248,
       "tag": "0000_abandoned_moira_mactaggert",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1781280243089,
+      "tag": "0001_new_stepford_cuckoos",
+      "breakpoints": true
     }
   ]
 }

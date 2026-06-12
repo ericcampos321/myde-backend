@@ -1,8 +1,10 @@
 import {
+  foreignKey,
   index,
   pgTable,
   text,
   timestamp,
+  unique,
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
@@ -16,9 +18,7 @@ export const whatsappConversations = pgTable(
     tenantId: uuid("tenant_id")
       .notNull()
       .references(() => tenants.id),
-    contactId: uuid("contact_id")
-      .notNull()
-      .references(() => whatsappContacts.id),
+    contactId: uuid("contact_id").notNull(),
     status: text("status").notNull().default("open"),
     lastMessageAt: timestamp("last_message_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
@@ -40,6 +40,19 @@ export const whatsappConversations = pgTable(
     index("whatsapp_conversations_tenant_status_idx").on(
       table.tenantId,
       table.status
+    ),
+    // FK composta: o contato referenciado deve pertencer ao MESMO tenant.
+    // Impede que uma conversa do tenant A aponte para contato do tenant B.
+    foreignKey({
+      columns: [table.contactId, table.tenantId],
+      foreignColumns: [whatsappContacts.id, whatsappContacts.tenantId],
+      name: "whatsapp_conversations_contact_tenant_fk",
+    }),
+    // Alvo de FK composta: garante que (id, tenantId) é único, permitindo que
+    // mensagens referenciem a conversa amarrando o tenant no nível do banco.
+    unique("whatsapp_conversations_id_tenant_unique").on(
+      table.id,
+      table.tenantId
     ),
   ]
 );

@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import {
   type AnyPgColumn,
   check,
+  foreignKey,
   index,
   pgTable,
   text,
@@ -19,9 +20,7 @@ export const whatsappMessages = pgTable(
     tenantId: uuid("tenant_id")
       .notNull()
       .references(() => tenants.id),
-    conversationId: uuid("conversation_id")
-      .notNull()
-      .references(() => whatsappConversations.id),
+    conversationId: uuid("conversation_id").notNull(),
     direction: text("direction", { enum: ["inbound", "outbound"] }).notNull(),
     body: text("body").notNull(),
     status: text("status").notNull(),
@@ -56,6 +55,13 @@ export const whatsappMessages = pgTable(
       table.tenantId,
       table.externalMessageId
     ),
+    // FK composta: a conversa referenciada deve pertencer ao MESMO tenant.
+    // Impede que uma mensagem do tenant A aponte para conversa do tenant B.
+    foreignKey({
+      columns: [table.conversationId, table.tenantId],
+      foreignColumns: [whatsappConversations.id, whatsappConversations.tenantId],
+      name: "whatsapp_messages_conversation_tenant_fk",
+    }),
   ]
 );
 
