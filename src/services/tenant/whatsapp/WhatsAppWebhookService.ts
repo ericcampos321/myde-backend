@@ -74,6 +74,16 @@ export class WhatsAppWebhookService {
     const verifyToken = query["hub.verify_token"];
     const challenge = query["hub.challenge"];
 
+    if (!env.META_VERIFY_TOKEN) {
+      // Sem fallback mock em dev/prod: falha explícita de configuração.
+      throw new AppError({
+        code: "META_VERIFY_TOKEN_NOT_CONFIGURED",
+        message:
+          "META_VERIFY_TOKEN não configurado. Defina a credencial real no .env para o handshake do webhook.",
+        statusCode: 500,
+      });
+    }
+
     if (
       mode !== "subscribe" ||
       verifyToken !== env.META_VERIFY_TOKEN ||

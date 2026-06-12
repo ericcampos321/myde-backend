@@ -30,6 +30,16 @@ export class WhatsAppSignatureService {
       });
     }
 
+    if (!env.META_APP_SECRET) {
+      // Sem fallback mock em dev/prod: falha explícita de configuração.
+      throw new AppError({
+        code: "META_APP_SECRET_NOT_CONFIGURED",
+        message:
+          "META_APP_SECRET não configurado. Defina a credencial real no .env para validar webhooks da Meta.",
+        statusCode: 500,
+      });
+    }
+
     const expectedSignature = hmacSha256Hex(rawBody, env.META_APP_SECRET);
     if (!safeCompare(expectedSignature, signatureHeader)) {
       throw new AppError({

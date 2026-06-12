@@ -60,7 +60,7 @@ seus envios. Veja o [README](README.md#-como-começar).
 |----------|-------------|--------------|
 | `OPENAI_API_KEY` | OpenAI (Project) | Sim |
 | `META_VERIFY_TOKEN` | Você define (qualquer string) | Sim (handshake) |
-| `META_APP_SECRET` | App real **ou** valor do mock (`.env.example`) | Sim (assinatura) |
+| `META_APP_SECRET` | App real **ou** valor do mock (ver `docker-compose.yml`, serviço `mock-meta`) | Sim (assinatura) |
 | `META_TOKEN` | System User token (real) — opcional com mock | Não (com mock) |
 | `META_API_BASE_URL` | `http://localhost:8001` (mock) ou `https://graph.facebook.com/v21.0` | Sim |
 | `META_PHONE_NUMBER_ID` | Mock aceita qualquer valor | Sim |
