@@ -30,9 +30,9 @@ Sem SQS, sem LocalStack. Tenant resolvido por `metadata.phone_number_id` /
 
 ```
 API (npm run dev)                         Worker (npm run dev:worker)
-  bootstrap/server.ts → bootstrap/app.ts    tenant/workers/message-processing/
+  bootstrap/server.ts → bootstrap/app.ts    tenant/message-processing/
   ├ GET /health                             ├ consome BullMQ (commit futuro)
-  ├ POST /webhook        (futuro)           ├ processor puro
+  ├ GET/POST /webhook                       ├ processor puro
   └ GET /conversations   (futuro)           └ shutdown gracioso
             │  enqueue jobId=externalMessageId
             ▼
@@ -50,17 +50,20 @@ src/
   plugins/          cors, sensible, raw-body
   shared/           errors, logger, utils
   db/               client.ts, schema.ts, migrations/
-  api/              rotas públicas/técnicas
-    health/         HealthController.ts
+  controllers/api/  rotas públicas/técnicas
+    health/         HealthController.ts, teste HTTP
   tenant/           tudo que é dado/processo do cliente
-    whatsapp/       webhook, contacts, conversations, messages, meta
-    ai/             AiTypes, providers/, knowledge-base/ (futuro)
-    queues/         message-processing/      — fila próxima do domínio
-    workers/        message-processing/      — worker dedicado por domínio
+    whatsapp-webhooks/
+    whatsapp-contacts/
+    whatsapp-conversations/
+    whatsapp-messages/
+    whatsapp-meta/
+    ai-responses/   AiTypes, providers/, knowledge-base/
+    message-processing/  fila, processor e worker dedicado
 ```
 
-`tenant/` agrupa o canal WhatsApp inteiro; novos canais (`tenant/instagram/`,
-`tenant/messenger/`) entram sem bagunçar a raiz.
+Cada pasta em `tenant/` representa uma capacidade funcional. Novos canais podem
+seguir o mesmo padrão, como `tenant/instagram-webhooks/`.
 
 ---
 
@@ -99,7 +102,7 @@ npm test
 
 | Script | Descrição |
 |---|---|
-| `dev` | API em watch (`src/server.ts`) |
+| `dev` | API em watch (`src/bootstrap/server.ts`) |
 | `dev:worker` | Worker dedicado em watch |
 | `build` | Compila para `dist/` (tsc) |
 | `start` / `start:worker` | Roda o build de produção |
