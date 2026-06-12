@@ -99,25 +99,30 @@ conhece o banco.
 
 > **Portas locais:** Postgres `5432`, **Redis `6380`** (externo — mapeado para
 > `6379` dentro do Docker, evitando conflito com Redis de outros projetos),
-> mock-meta `8001`. Os defaults do app já apontam para essas portas.
+> mock-meta `8001`.
+
+### Fluxo local (desenvolvimento com mock)
 
 ```bash
-# 1. Dependências
+# 1. Copiar template de variáveis de ambiente
+cp .env.example .env
+
+# 2. Dependências
 npm install
 
-# 2. Infra local (Postgres, Redis, mock-meta)
+# 3. Infra local (Postgres, Redis, mock-meta)
 docker compose up -d postgres redis mock-meta
 curl http://localhost:8001/health   # mock da Meta
 
-# 3. Migrações e seed
+# 4. Migrações e seed
 npm run db:migrate
 npm run db:seed
 
-# 4. API (porta 8000)
+# 5. API (porta 8000)
 npm run dev
 curl http://localhost:8000/health   # → { "ok": true, "service": "myde-backend" }
 
-# 5. Worker dedicado (outro terminal)
+# 6. Worker dedicado (outro terminal)
 npm run dev:worker
 ```
 
@@ -125,15 +130,26 @@ Quando o worker sobe, ele registra qual provider de IA está ativo:
 `stub` quando `OPENAI_API_KEY` não está configurada e `openai` quando a chave
 existe.
 
-### Variáveis de ambiente e segredos
+### Variáveis de ambiente
 
-- Para **desenvolvimento com o mock** você não precisa de `.env`: os defaults em
-  `src/config/env.ts` já sobem o app contra o mock da Meta e o Redis na `6380`.
-- Para **OpenAI/Meta reais**, copie o template e preencha **apenas localmente**:
-  `cp .env.example .env`. O `.env.example` traz os segredos reais **em branco**.
-- **`.env` é local e está no `.gitignore` — nunca commite.**
-  `OPENAI_API_KEY`, `META_TOKEN`, `META_APP_SECRET` e demais segredos **nunca**
-  devem ir para o git.
+- **Fluxo recomendado:** copiar `.env.example` → `.env` (local, não versionado).
+- **`.env.example`** é o template seguro, com segredos em branco. Vai para git.
+- **`.env`** é o arquivo real que o app lê (via `dotenv/config` em `src/config/env.ts`).
+  Está no `.gitignore` — nunca commite.
+- **Defaults** em `src/config/env.ts`: fallback coerente, mas o fluxo documentado
+  principal usa `.env` para máxima clareza.
+
+#### Para desenvolvimento com Meta real ou OpenAI:
+
+Editar `.env` localmente (não commitar):
+```env
+OPENAI_API_KEY=sk-...             # sua chave real
+META_TOKEN=EAAx...                # seu token real
+META_APP_SECRET=abc123...         # seu secret real
+META_API_BASE_URL=https://graph.facebook.com/v20.0
+```
+
+**Segredos nunca devem ir para o git.** O `.gitignore` protege `.env`.
 
 ### Validação
 
