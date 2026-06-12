@@ -16,6 +16,10 @@ import { hmacSha256Hex } from "../../shared/utils/crypto.js";
 import { WhatsAppContactRepository } from "../whatsapp-contacts/index.js";
 import { WhatsAppConversationRepository } from "../whatsapp-conversations/index.js";
 import { WhatsAppMessageRepository } from "../whatsapp-messages/index.js";
+import type {
+  MessageProcessingJobPayload,
+  MessageProcessingQueuePort,
+} from "../message-processing/index.js";
 import { WhatsAppTenantRepository } from "../whatsapp-tenants/index.js";
 import { WhatsAppWebhookService } from "./WhatsAppWebhookService.js";
 
@@ -36,6 +40,21 @@ const conversationRepository = new WhatsAppConversationRepository(database);
 const messageRepository = new WhatsAppMessageRepository(database);
 let tenantId = "";
 let app: FastifyInstance;
+const enqueuedJobs: MessageProcessingJobPayload[] = [];
+let shouldFailEnqueue = false;
+
+const fakeQueue: MessageProcessingQueuePort = {
+  async enqueueInboundMessage(payload) {
+    if (shouldFailEnqueue) {
+      throw new Error("queue unavailable");
+    }
+    enqueuedJobs.push(payload);
+    return {
+      jobId: payload.externalMessageId,
+      jobName: "process-inbound-message",
+    };
+  },
+};
 
 function payload(options: {
   messageId?: string;
@@ -111,6 +130,7 @@ beforeAll(async () => {
     contactRepository,
     conversationRepository,
     messageRepository,
+    messageProcessingQueue: fakeQueue,
   });
   app = await buildApp({ webhookService });
   await app.ready();
@@ -134,8 +154,44 @@ afterAll(async () => {
 });
 
 describeDatabase("POST /webhook com persistencia", () => {
+  it("persiste e enfileira a mensagem nova com payload correto", async () => {
+    const messageId = `${marker}-wamid-enqueue`;
+    enqueuedJobs.length = 0;
+
+    const response = await injectSigned(payload({ messageId }));
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      received: true,
+      persisted: true,
+      duplicated: false,
+    });
+    expect(enqueuedJobs).toHaveLength(1);
+
+    const persistedMessage = await messageRepository.findByExternalMessageId(
+      tenantId,
+      messageId
+    );
+    const persistedConversation = (
+      await database
+        .select()
+        .from(whatsappConversations)
+        .where(eq(whatsappConversations.tenantId, tenantId))
+    ).find((item) => item.id === persistedMessage?.conversationId);
+
+    expect(enqueuedJobs[0]).toEqual({
+      tenantId,
+      conversationId: persistedConversation!.id,
+      messageId: persistedMessage!.id,
+      externalMessageId: messageId,
+      phoneNumberId,
+      contactPhone,
+    });
+  });
+
   it("persiste contato, conversa e mensagem inbound", async () => {
     const messageId = `${marker}-wamid-persist`;
+    enqueuedJobs.length = 0;
     const response = await injectSigned(payload({ messageId }));
 
     expect(response.statusCode).toBe(200);
@@ -171,11 +227,13 @@ describeDatabase("POST /webhook com persistencia", () => {
       status: "received",
     });
     expect(message?.createdAt).toEqual(new Date(1760000000 * 1000));
+    expect(enqueuedJobs).toHaveLength(1);
   });
 
   it("nao duplica mensagem e retorna duplicated true", async () => {
     const messageId = `${marker}-wamid-duplicate`;
     const body = payload({ messageId });
+    enqueuedJobs.length = 0;
 
     expect((await injectSigned(body)).json()).toMatchObject({
       persisted: true,
@@ -186,6 +244,7 @@ describeDatabase("POST /webhook com persistencia", () => {
       persisted: false,
       duplicated: true,
     });
+    expect(enqueuedJobs).toHaveLength(1);
 
     const rows = await database
       .select()
@@ -201,6 +260,7 @@ describeDatabase("POST /webhook com persistencia", () => {
 
   it("ignora tenant desconhecido sem persistir", async () => {
     const messageId = `${marker}-wamid-unknown`;
+    enqueuedJobs.length = 0;
     const response = await injectSigned(
       payload({ messageId, targetPhoneNumberId: unknownPhoneNumberId })
     );
@@ -213,9 +273,11 @@ describeDatabase("POST /webhook com persistencia", () => {
     expect(
       await messageRepository.findByExternalMessageId(tenantId, messageId)
     ).toBeNull();
+    expect(enqueuedJobs).toHaveLength(0);
   });
 
   it("ignora evento sem text", async () => {
+    enqueuedJobs.length = 0;
     const response = await injectSigned(payload({ includeText: false }));
 
     expect(response.json()).toEqual({
@@ -223,10 +285,12 @@ describeDatabase("POST /webhook com persistencia", () => {
       ignored: true,
       reason: "unsupported_event",
     });
+    expect(enqueuedJobs).toHaveLength(0);
   });
 
   it("rejeita assinatura invalida antes de persistir", async () => {
     const messageId = `${marker}-wamid-invalid-signature`;
+    enqueuedJobs.length = 0;
     const response = await injectSigned(
       payload({ messageId }),
       payload({ messageId: "outro-id" })
@@ -236,5 +300,22 @@ describeDatabase("POST /webhook com persistencia", () => {
     expect(
       await messageRepository.findByExternalMessageId(tenantId, messageId)
     ).toBeNull();
+    expect(enqueuedJobs).toHaveLength(0);
+  });
+
+  it("retorna 500 quando persiste mas falha ao enfileirar", async () => {
+    const messageId = `${marker}-wamid-enqueue-fail`;
+    enqueuedJobs.length = 0;
+    shouldFailEnqueue = true;
+
+    const response = await injectSigned(payload({ messageId }));
+
+    shouldFailEnqueue = false;
+
+    expect(response.statusCode).toBe(500);
+    expect(
+      await messageRepository.findByExternalMessageId(tenantId, messageId)
+    ).not.toBeNull();
+    expect(enqueuedJobs).toHaveLength(0);
   });
 });

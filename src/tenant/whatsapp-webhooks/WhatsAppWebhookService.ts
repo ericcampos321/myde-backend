@@ -2,6 +2,10 @@ import type { Logger } from "pino";
 import { env } from "../../config/env.js";
 import { AppError } from "../../shared/errors/AppError.js";
 import { createLogger } from "../../shared/logger/logger.js";
+import {
+  BullMqMessageProcessingQueue,
+  type MessageProcessingQueuePort,
+} from "../message-processing/index.js";
 import { WhatsAppContactRepository } from "../whatsapp-contacts/index.js";
 import { WhatsAppConversationRepository } from "../whatsapp-conversations/index.js";
 import { WhatsAppMessageRepository } from "../whatsapp-messages/index.js";
@@ -21,6 +25,7 @@ export interface WhatsAppWebhookServiceDependencies {
   contactRepository?: WhatsAppContactRepository;
   conversationRepository?: WhatsAppConversationRepository;
   messageRepository?: WhatsAppMessageRepository;
+  messageProcessingQueue?: MessageProcessingQueuePort;
   log?: Logger;
 }
 
@@ -31,6 +36,7 @@ export class WhatsAppWebhookService {
   private readonly contactRepository: WhatsAppContactRepository;
   private readonly conversationRepository: WhatsAppConversationRepository;
   private readonly messageRepository: WhatsAppMessageRepository;
+  private readonly messageProcessingQueue: MessageProcessingQueuePort;
   private readonly log: Logger;
 
   constructor(dependencies: WhatsAppWebhookServiceDependencies = {}) {
@@ -45,6 +51,8 @@ export class WhatsAppWebhookService {
       dependencies.conversationRepository ?? new WhatsAppConversationRepository();
     this.messageRepository =
       dependencies.messageRepository ?? new WhatsAppMessageRepository();
+    this.messageProcessingQueue =
+      dependencies.messageProcessingQueue ?? new BullMqMessageProcessingQueue();
     this.log = dependencies.log ?? createLogger({ module: "whatsapp-webhook" });
   }
 
@@ -128,6 +136,29 @@ export class WhatsAppWebhookService {
 
     if (!message) {
       return { received: true, persisted: false, duplicated: true };
+    }
+
+    try {
+      await this.messageProcessingQueue.enqueueInboundMessage({
+        tenantId: tenant.id,
+        conversationId: conversation!.id,
+        messageId: message.id,
+        externalMessageId: inbound.externalMessageId,
+        phoneNumberId: inbound.phoneNumberId,
+        contactPhone: inbound.contactPhone,
+      });
+    } catch (error) {
+      this.log.error(
+        {
+          err: error,
+          tenantId: tenant.id,
+          conversationId: conversation!.id,
+          messageId: message.id,
+          externalMessageId: inbound.externalMessageId,
+        },
+        "failed to enqueue inbound message"
+      );
+      throw error;
     }
 
     return { received: true, persisted: true, duplicated: false };

@@ -3,8 +3,8 @@
 Backend de **Atendimento WhatsApp com IA** — recebe webhooks da Meta, persiste
 mensagens, processa de forma assíncrona com uma LLM e responde via Meta API (mock).
 
-> Estado atual: API Fastify, webhook assinado, schema Drizzle e repositories
-> base. BullMQ, processamento real do worker e OpenAI entram depois.
+> Estado atual: API Fastify, webhook assinado, schema Drizzle, repositories e
+> dispatch BullMQ para mensagens inbound. Worker real e OpenAI entram depois.
 
 ---
 
@@ -20,7 +20,7 @@ mensagens, processa de forma assíncrona com uma LLM e responde via Meta API (mo
 | Logs | Pino (estruturado) |
 | Testes | Vitest |
 
-**Decisões:** PostgreSQL é a fonte da verdade; Redis/BullMQ será apenas dispatch.
+**Decisões:** PostgreSQL é a fonte da verdade; Redis/BullMQ é apenas dispatch.
 Sem SQS, sem LocalStack. Tenant resolvido por `metadata.phone_number_id` /
 `entry[].id` do payload — tenant desconhecido é rejeitado, sem auto-provisionar.
 
@@ -35,7 +35,7 @@ clientes. Eventos sem mensagem de texto também são aceitos e ignorados.
 ```
 API (npm run dev)                         Worker (npm run dev:worker)
   bootstrap/server.ts → bootstrap/app.ts    tenant/message-processing/
-  ├ GET /health                             ├ consome BullMQ (commit futuro)
+  ├ GET /health                             ├ consumira BullMQ (commit futuro)
   ├ GET/POST /webhook                       ├ processor puro
   └ GET /conversations   (futuro)           └ shutdown gracioso
             │  enqueue jobId=externalMessageId
@@ -76,7 +76,7 @@ seguir o mesmo padrão, como `tenant/instagram-webhooks/`.
 
 ```bash
 # 1. Infra local (Postgres, Redis, mock-meta)
-docker compose up -d
+docker compose up -d postgres redis mock-meta
 curl http://localhost:8001/health   # mock da Meta
 
 # 2. Variáveis de ambiente
@@ -114,10 +114,14 @@ npm run db:seed
 
 # Suíte de integração dos repositories, com Postgres migrado disponível
 RUN_DB_TESTS=true npm test
+
+# Integração opcional da BullMQ, com Redis ativo
+RUN_REDIS_TESTS=true npm test
 ```
 
 PostgreSQL permanece a fonte da verdade. Redis/BullMQ será adicionado apenas
-como dispatch; SQS e LocalStack não fazem parte da solução.
+como dispatch idempotente por `externalMessageId`; SQS e LocalStack não fazem
+parte da solução.
 
 ---
 
