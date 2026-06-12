@@ -131,7 +131,7 @@ describeDatabase("repositories com PostgreSQL", () => {
     expect(found?.direction).toBe("inbound");
   });
 
-  it("expoe a constraint ao tentar duplicar inbound", async () => {
+  it("evita duplicar inbound pelo mesmo externalMessageId", async () => {
     const { tenant, conversation } = await createConversation();
     const data = {
       tenantId: tenant.id,
@@ -140,8 +140,10 @@ describeDatabase("repositories com PostgreSQL", () => {
       externalMessageId: `${marker}-wamid-duplicate`,
       createdAt: new Date(),
     };
-    await messageRepository.createInbound(data);
+    const first = await messageRepository.createInbound(data);
+    const duplicate = await messageRepository.createInbound(data);
 
-    await expect(messageRepository.createInbound(data)).rejects.toThrow();
+    expect(first).toBeDefined();
+    expect(duplicate).toBeUndefined();
   });
 });

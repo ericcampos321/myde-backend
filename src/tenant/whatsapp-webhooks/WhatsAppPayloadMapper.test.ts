@@ -1,0 +1,59 @@
+import { describe, expect, it } from "vitest";
+import { WhatsAppPayloadMapper } from "./WhatsAppPayloadMapper.js";
+
+describe("WhatsAppPayloadMapper", () => {
+  const mapper = new WhatsAppPayloadMapper();
+
+  it("extrai uma mensagem text da Meta", () => {
+    const result = mapper.map({
+      object: "whatsapp_business_account",
+      entry: [
+        {
+          id: "WABA_TESTE_0001",
+          changes: [
+            {
+              value: {
+                metadata: { phone_number_id: "123456789012345" },
+                contacts: [
+                  {
+                    profile: { name: "Cliente Teste" },
+                    wa_id: "5511999990000",
+                  },
+                ],
+                messages: [
+                  {
+                    from: "5511999990000",
+                    id: "wamid.mapper-1",
+                    timestamp: "1760000000",
+                    type: "text",
+                    text: { body: "Quais sao os planos?" },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(result).toEqual({
+      kind: "message",
+      message: {
+        phoneNumberId: "123456789012345",
+        wabaId: "WABA_TESTE_0001",
+        externalMessageId: "wamid.mapper-1",
+        contactPhone: "5511999990000",
+        contactName: "Cliente Teste",
+        text: "Quais sao os planos?",
+        timestamp: new Date(1760000000 * 1000),
+      },
+    });
+  });
+
+  it("ignora evento sem mensagem text", () => {
+    expect(mapper.map({ entry: [{ changes: [{ value: {} }] }] })).toEqual({
+      kind: "ignored",
+      reason: "unsupported_event",
+    });
+  });
+});

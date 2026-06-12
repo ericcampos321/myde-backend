@@ -1,4 +1,4 @@
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, isNotNull } from "drizzle-orm";
 import { db, type Database } from "../../db/client.js";
 import { whatsappMessages } from "../../db/schema.js";
 import type {
@@ -41,6 +41,10 @@ export class WhatsAppMessageRepository {
         ...data,
         direction: "inbound",
         status: "received",
+      })
+      .onConflictDoNothing({
+        target: [whatsappMessages.tenantId, whatsappMessages.externalMessageId],
+        where: isNotNull(whatsappMessages.externalMessageId),
       })
       .returning();
     return message;

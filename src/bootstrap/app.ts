@@ -6,13 +6,22 @@ import { registerCors } from "../plugins/cors.plugin.js";
 import { registerSensible } from "../plugins/sensible.plugin.js";
 import { registerRawBody } from "../plugins/raw-body.plugin.js";
 import { healthController } from "../controllers/api/health/index.js";
-import { whatsAppWebhookController } from "../tenant/whatsapp-webhooks/index.js";
+import {
+  whatsAppWebhookController,
+  type WhatsAppWebhookService,
+} from "../tenant/whatsapp-webhooks/index.js";
 
 /**
  * Monta a instância Fastify com plugins e rotas, sem subir o listener.
  * Mantida fina: orquestra registros e delega regra de negócio aos módulos.
  */
-export async function buildApp(): Promise<FastifyInstance> {
+export interface BuildAppOptions {
+  webhookService?: WhatsAppWebhookService;
+}
+
+export async function buildApp(
+  options: BuildAppOptions = {}
+): Promise<FastifyInstance> {
   const app = Fastify({
     logger: loggerOptions,
     disableRequestLogging: env.NODE_ENV === "test",
@@ -25,7 +34,9 @@ export async function buildApp(): Promise<FastifyInstance> {
   app.setErrorHandler(httpErrorHandler);
 
   await app.register(healthController);
-  await app.register(whatsAppWebhookController);
+  await app.register(whatsAppWebhookController, {
+    webhookService: options.webhookService,
+  });
 
   return app;
 }

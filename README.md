@@ -24,6 +24,10 @@ mensagens, processa de forma assíncrona com uma LLM e responde via Meta API (mo
 Sem SQS, sem LocalStack. Tenant resolvido por `metadata.phone_number_id` /
 `entry[].id` do payload — tenant desconhecido é rejeitado, sem auto-provisionar.
 
+Webhooks assinados de tenants desconhecidos recebem HTTP 200 e são ignorados
+com log de aviso. Isso evita retries infinitos da Meta sem auto-provisionar
+clientes. Eventos sem mensagem de texto também são aceitos e ignorados.
+
 ---
 
 ## Arquitetura (dois processos)

@@ -86,8 +86,11 @@ describe("GET /webhook", () => {
 });
 
 describe("POST /webhook", () => {
-  it("aceita assinatura valida", async () => {
-    const rawBody = JSON.stringify(metaPayload);
+  it("aceita assinatura valida sem depender de banco", async () => {
+    const rawBody = JSON.stringify({
+      object: "whatsapp_business_account",
+      entry: [{ id: "WABA_TESTE_0001", changes: [{ value: {} }] }],
+    });
     const res = await app.inject({
       method: "POST",
       url: "/webhook",
@@ -99,7 +102,11 @@ describe("POST /webhook", () => {
     });
 
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ received: true });
+    expect(res.json()).toEqual({
+      received: true,
+      ignored: true,
+      reason: "unsupported_event",
+    });
   });
 
   it("rejeita assinatura invalida", async () => {
