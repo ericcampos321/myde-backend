@@ -55,7 +55,7 @@ const envSchema = z.object({
     .default("https://graph.facebook.com/v20.0"),
 
   OPENAI_API_KEY: z.string().optional(),
-  OPENAI_MODEL: z.string().min(1).default("gpt-4o-mini"),
+  OPENAI_MODEL: z.string().min(1).default("gpt-5.4"),
 });
 
 // Valores em branco no .env (ex.: copiado do .env.example) são tratados como

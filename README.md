@@ -147,15 +147,35 @@ Para os **fluxos reais** de IA e Meta, preencha no `.env` local:
   chamadas da Meta — os fluxos reais ficam indisponíveis até serem configurados.
 - **Segredos nunca devem ir para o git.** O `.gitignore` protege `.env`.
 
-### Mock da Meta (opcional, só para testes manuais)
+### Webhook real da Meta (ambiente de teste)
 
-O `docker-compose.yml` inclui um serviço `mock-meta` (porta `8001`) que simula a
-Graph API para testes locais **sem** a Meta real. Não faz parte do fluxo padrão.
-Para usá-lo, suba-o explicitamente e aponte o `.env` para ele:
+O fluxo padrão usa a **Meta WhatsApp Cloud API real** (use o ambiente de teste da
+Meta para desenvolvimento — número de teste gratuito). Para receber webhooks no
+backend local:
+
+1. Exponha a API local (porta `8000`) publicamente com um túnel:
+   `ngrok http 8000` (ou `cloudflared tunnel --url http://localhost:8000`).
+2. No painel da Meta (**WhatsApp → Configuration → Webhooks**):
+   - **Callback URL**: `https://<seu-túnel>/webhook` (o endpoint real do backend).
+   - **Verify token**: a mesma string definida em `META_VERIFY_TOKEN` no `.env`.
+   - Assine o campo **`messages`**.
+3. `META_APP_SECRET` valida a assinatura `X-Hub-Signature-256` de cada evento.
+
+Passo a passo completo de credenciais em [SETUP-CREDENCIAIS.md](SETUP-CREDENCIAIS.md).
+
+### Mock da Meta (legado/opcional — não é o ambiente padrão)
+
+> O caminho padrão é a **Meta real de teste** (acima). O `mock-meta` é apenas uma
+> ferramenta auxiliar legada para testes manuais offline — **não** representa o
+> ambiente padrão e não é necessário no fluxo principal.
+
+O `docker-compose.yml` ainda inclui o serviço `mock-meta` (porta `8001`). Ele não
+sobe com `docker compose up -d postgres redis`; para usá-lo, suba explicitamente e
+aponte o `.env` para ele:
 
 ```bash
 docker compose up -d mock-meta
-# no .env:  META_API_BASE_URL=http://localhost:8001
+# no .env (apenas para esse modo legado):  META_API_BASE_URL=http://localhost:8001
 ```
 
 ### Validação
