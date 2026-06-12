@@ -36,9 +36,9 @@ clientes. Eventos sem mensagem de texto também são aceitos e ignorados.
 
 ```
 API (npm run dev)                         Worker (npm run dev:worker)
-  bootstrap/server.ts → bootstrap/app.ts    tenant/message-processing/
-  ├ GET /health                             ├ consumira BullMQ (commit futuro)
-  ├ GET/POST /webhook                       ├ processor + ai-responses/
+  bootstrap/server.ts → bootstrap/app.ts    workers/message-processing/
+  ├ GET /health                             ├ consome BullMQ
+  ├ GET/POST /webhook                       ├ processor + services/tenant/ai
   └ GET /conversations   (futuro)           └ shutdown gracioso
             │  enqueue jobId=externalMessageId
             ▼
@@ -47,30 +47,34 @@ API (npm run dev)                         Worker (npm run dev:worker)
             └────────  PostgreSQL  ◀───┘   (fonte da verdade)
 ```
 
-### Organização por contexto (padrão Rufus)
+### Organização por camadas (padrão Rufus)
 
 ```
 src/
-  bootstrap/        app.ts, server.ts        — composição e entrypoint HTTP
-  config/           env.ts
-  plugins/          cors, sensible, raw-body
-  shared/           errors, logger, utils
-  db/               client.ts, schema.ts, migrations/
-  controllers/api/  rotas públicas/técnicas
-    health/         HealthController.ts, teste HTTP
-  tenant/           tudo que é dado/processo do cliente
-    whatsapp-webhooks/
-    whatsapp-contacts/
-    whatsapp-conversations/
-    whatsapp-messages/
-    whatsapp-meta/
-    whatsapp-tenants/
-    ai-responses/   AiTypes, providers/, knowledge-base/
-    message-processing/  fila, processor e worker dedicado
+  bootstrap/      app.ts, server.ts          — composição e entrypoint HTTP
+  config/         env.ts
+  routes/         registro de rotas (api/, tenant/) — registerRoutes(app)
+  controllers/    handlers HTTP finos; chamam services
+    api/health/   tenant/whatsapp/
+  services/       casos de uso e orquestração
+    tenant/whatsapp/  tenant/ai/  tenant/message-processing/
+  repositories/   acesso a dados (Drizzle), isolado por tenantId
+    tenant/whatsapp/
+  schemas/        contratos Zod de entrada/saída por domínio
+  types/          DTOs e tipos por domínio (tenant/whatsapp, tenant/ai)
+  models/db/      schema Drizzle (fonte dos tipos de tabela)
+  db/             client.ts, migrations/, seeds/
+  queues/         BullMQ Queue (enqueue idempotente por jobId)
+  workers/        processo dedicado: bootstrap, eventos, shutdown
+  clients/        contratos de integrações externas (meta/)
+  plugins/        cors, sensible, raw-body
+  errors/         AppError, HttpError (error handler central)
+  shared/         logger, utils
 ```
 
-Cada pasta em `tenant/` representa uma capacidade funcional. Novos canais podem
-seguir o mesmo padrão, como `tenant/instagram-webhooks/`.
+Regras de dependência: controller → service → repository/queue. Controller não
+importa repository nem queue; worker chama o processor (service); repository só
+conhece o banco.
 
 ---
 
@@ -109,7 +113,7 @@ npm test
 
 ### Banco de dados
 
-O schema Drizzle fica em `src/db/schema.ts` e as migrations em
+O schema Drizzle fica em `src/models/db/schema.ts` e as migrations em
 `src/db/migrations/`. O seed explícito cria ou atualiza o tenant padrão
 **NeoFibra** usando `META_PHONE_NUMBER_ID`; ele não roda no startup da API.
 

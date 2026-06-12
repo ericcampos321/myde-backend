@@ -1,7 +1,7 @@
 import { buildApp } from "./app.js";
 import { env } from "../config/env.js";
 import { logger } from "../shared/logger/logger.js";
-import { closeMessageProcessingQueue } from "../tenant/message-processing/index.js";
+import { closeMessageProcessingQueue } from "../queues/message-processing/index.js";
 
 /** Bootstrap do processo HTTP da API. */
 async function start(): Promise<void> {

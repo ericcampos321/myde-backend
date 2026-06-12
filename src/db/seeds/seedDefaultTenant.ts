@@ -1,6 +1,6 @@
 import { closeDb } from "../client.js";
 import { env } from "../../config/env.js";
-import { WhatsAppTenantRepository } from "../../tenant/whatsapp-tenants/index.js";
+import { WhatsAppTenantRepository } from "../../repositories/tenant/whatsapp/index.js";
 
 async function seedDefaultTenant(): Promise<void> {
   const repository = new WhatsAppTenantRepository();

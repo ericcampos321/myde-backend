@@ -9,10 +9,10 @@
   },
   "scripts": {
     "dev": "tsx watch src/bootstrap/server.ts",
-    "dev:worker": "tsx watch src/tenant/message-processing/MessageProcessingWorker.ts",
+    "dev:worker": "tsx watch src/workers/message-processing/MessageProcessingWorker.ts",
     "build": "tsc",
     "start": "node dist/bootstrap/server.js",
-    "start:worker": "node dist/tenant/message-processing/MessageProcessingWorker.js",
+    "start:worker": "node dist/workers/message-processing/MessageProcessingWorker.js",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",

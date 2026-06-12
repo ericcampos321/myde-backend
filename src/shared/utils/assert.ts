@@ -1,4 +1,4 @@
-import { AppError } from "../errors/AppError.js";
+import { AppError } from "../../errors/AppError.js";
 
 /** Garante uma invariante de domínio; lança AppError 500 se violada. */
 export function assert(condition: unknown, message: string): asserts condition {
