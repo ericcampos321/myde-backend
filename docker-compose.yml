@@ -1,3 +1,7 @@
+# Nome do projeto explícito: isola containers/volumes de outros projetos (ex.: Rufus).
+# Containers ficam como myde-backend-<service>-1; volumes como myde-backend_myde_*.
+name: myde-backend
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -8,7 +12,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - polls_pg_data:/var/lib/postgresql/data
+      - myde_pg_data:/var/lib/postgresql/data
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -U postgres" ]
       interval: 5s
@@ -17,16 +21,17 @@ services:
 
   redis:
     image: redis:7-alpine
+    # Externamente em 6380 para evitar conflito com Redis de outros projetos na 6379.
+    # Internamente (rede Docker) o serviço continua na 6379: redis://redis:6379
     ports:
-      - "6379:6379"
+      - "6380:6379"
     healthcheck:
       test: [ "CMD", "redis-cli", "ping" ]
       interval: 5s
       timeout: 3s
       retries: 5
-
     volumes:
-      - polls_redis_data:/var/lib/redis/data
+      - myde_redis_data:/var/lib/redis/data
 
   mock-meta:
     build: ./mock-meta-server
@@ -39,5 +44,5 @@ services:
       - "host.docker.internal:host-gateway"
 
 volumes:
-  polls_pg_data:
-  polls_redis_data:
+  myde_pg_data:
+  myde_redis_data:

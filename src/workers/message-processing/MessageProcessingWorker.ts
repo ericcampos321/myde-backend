@@ -1,11 +1,10 @@
 import {
   QueueEvents,
   Worker,
-  type ConnectionOptions,
   type Job,
 } from "bullmq";
 import { pathToFileURL } from "node:url";
-import { env } from "../../config/env.js";
+import { getRedisConnectionOptions } from "../../infrastructure/index.js";
 import { closeDb } from "../../db/client.js";
 import { createLogger } from "../../shared/logger/logger.js";
 import { createAiResponseService } from "../../services/tenant/ai/index.js";
@@ -30,21 +29,6 @@ export interface MessageProcessingWorkerDependencies
   processor?: Pick<MessageProcessingProcessor, "processMessageJob">;
 }
 
-function getRedisConnectionOptions(): ConnectionOptions {
-  const redisUrl = new URL(env.REDIS_URL);
-  const database =
-    redisUrl.pathname.length > 1 ? Number(redisUrl.pathname.slice(1)) : undefined;
-  const host = redisUrl.hostname === "localhost" ? "127.0.0.1" : redisUrl.hostname;
-
-  return {
-    host,
-    port: redisUrl.port ? Number(redisUrl.port) : 6379,
-    username: redisUrl.username || undefined,
-    password: redisUrl.password || undefined,
-    db: Number.isNaN(database) ? undefined : database,
-    maxRetriesPerRequest: null,
-  };
-}
 
 export async function createMessageProcessingWorker(
   dependencies: MessageProcessingWorkerDependencies = {}

@@ -3,8 +3,9 @@ import { z } from "zod";
 
 /**
  * Única leitura de process.env na aplicação.
- * Valores padrão refletem o ambiente local/mock documentado no .env.example —
- * o app sobe out-of-the-box para avaliação. Em produção, sobrescreva via ambiente.
+ * Valores padrão refletem o ambiente local/mock — o app sobe out-of-the-box
+ * para avaliação (Meta apontando para o mock). Em produção, sobrescreva via
+ * ambiente/.env. Redis fica na 6380 no host para evitar conflito com a 6379.
  */
 const envSchema = z.object({
   NODE_ENV: z
@@ -20,7 +21,7 @@ const envSchema = z.object({
     .string()
     .min(1)
     .default("postgres://postgres:postgres@localhost:5432/atendimento"),
-  REDIS_URL: z.string().min(1).default("redis://localhost:6379"),
+  REDIS_URL: z.string().min(1).default("redis://localhost:6380"),
 
   META_VERIFY_TOKEN: z.string().min(1).default("meu-verify-token-secreto"),
   META_APP_SECRET: z.string().min(1).default("super-secret-app-secret-trocar"),

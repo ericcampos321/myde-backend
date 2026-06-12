@@ -97,16 +97,21 @@ conhece o banco.
 
 ## Como rodar
 
+> **Portas locais:** Postgres `5432`, **Redis `6380`** (externo — mapeado para
+> `6379` dentro do Docker, evitando conflito com Redis de outros projetos),
+> mock-meta `8001`. Os defaults do app já apontam para essas portas.
+
 ```bash
-# 1. Infra local (Postgres, Redis, mock-meta)
+# 1. Dependências
+npm install
+
+# 2. Infra local (Postgres, Redis, mock-meta)
 docker compose up -d postgres redis mock-meta
 curl http://localhost:8001/health   # mock da Meta
 
-# 2. Variáveis de ambiente
-cp .env.example .env
-
-# 3. Dependências
-npm install
+# 3. Migrações e seed
+npm run db:migrate
+npm run db:seed
 
 # 4. API (porta 8000)
 npm run dev
@@ -119,6 +124,16 @@ npm run dev:worker
 Quando o worker sobe, ele registra qual provider de IA está ativo:
 `stub` quando `OPENAI_API_KEY` não está configurada e `openai` quando a chave
 existe.
+
+### Variáveis de ambiente e segredos
+
+- Para **desenvolvimento com o mock** você não precisa de `.env`: os defaults em
+  `src/config/env.ts` já sobem o app contra o mock da Meta e o Redis na `6380`.
+- Para **OpenAI/Meta reais**, copie o template e preencha **apenas localmente**:
+  `cp .env.example .env`. O `.env.example` traz os segredos reais **em branco**.
+- **`.env` é local e está no `.gitignore` — nunca commite.**
+  `OPENAI_API_KEY`, `META_TOKEN`, `META_APP_SECRET` e demais segredos **nunca**
+  devem ir para o git.
 
 ### Validação
 
@@ -186,7 +201,9 @@ mas ainda não persiste mensagem outbound nem chama a Meta para envio.
 ## Variáveis de ambiente
 
 Todas validadas em `src/config/env.ts` (única leitura de `process.env`).
-Padrões locais refletem o `.env.example`/mock — sobrescreva em produção.
+Os defaults sobem o ambiente local/mock (Redis na `6380`); o `.env.example`
+documenta o setup real com os segredos em branco. Sobrescreva via `.env` local
+(gitignored) — nunca commite segredos.
 
 `NODE_ENV`, `PORT` (8000), `HOST` (0.0.0.0), `LOG_LEVEL`, `DATABASE_URL`,
 `REDIS_URL`, `META_VERIFY_TOKEN`, `META_APP_SECRET`, `META_TOKEN`,
