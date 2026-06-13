@@ -25,6 +25,7 @@ import type {
   MetaWebhookAckResponse,
   MetaWebhookHeaders,
   MetaWebhookVerificationQuery,
+  NormalizedMessageStatus,
 } from "../../../types/tenant/whatsapp/WhatsAppWebhookTypes.js";
 
 export interface WhatsAppWebhookServiceDependencies {
@@ -113,13 +114,14 @@ export class WhatsAppWebhookService {
     );
 
     const mapped = this.payloadMapper.map(params.payload);
+    if (mapped.kind === "status") {
+      // Status de entrega de outbound (sent/delivered/read/failed): loga de forma
+      // clara e atualiza o status da mensagem (best-effort). Sem worker, sem erro,
+      // 200 para a Meta.
+      await this.handleStatusEvent(mapped.phoneNumberId, mapped.statuses);
+      return WebhookDeliveryPolicy.ignoredStatusEvent();
+    }
     if (mapped.kind === "ignored") {
-      if (mapped.reason === "status_event") {
-        // Status de entrega de outbound (sent/delivered/read). Esperado: ignora
-        // explicitamente, sem worker e sem erro. Mantém 200 para a Meta.
-        this.log.info({ reason: mapped.reason }, "webhook status event ignored");
-        return WebhookDeliveryPolicy.ignoredStatusEvent();
-      }
       this.log.warn({ reason: mapped.reason }, "webhook event ignored");
       return WebhookDeliveryPolicy.ignoredUnsupportedEvent();
     }
@@ -221,5 +223,63 @@ export class WhatsAppWebhookService {
     }
 
     return WebhookDeliveryPolicy.persisted();
+  }
+
+  /**
+   * Trata eventos de status de entrega da outbound (sent/delivered/read/failed).
+   * Loga de forma clara (deixa explícito quando a Meta retornou `failed`) e
+   * atualiza o status da mensagem outbound pelo externalMessageId (best-effort,
+   * tenant-scoped). Nunca lança — o ACK para a Meta continua 200.
+   */
+  private async handleStatusEvent(
+    phoneNumberId: string | null,
+    statuses: NormalizedMessageStatus[]
+  ): Promise<void> {
+    for (const s of statuses) {
+      const level = s.status === "failed" ? "warn" : "info";
+      this.log[level](
+        {
+          externalMessageId: s.messageId,
+          status: s.status,
+          errorCode: s.errorCode,
+          errorTitle: s.errorTitle,
+        },
+        "webhook status event"
+      );
+    }
+
+    // Atualiza o status no banco, se conseguirmos resolver o tenant.
+    const resolution =
+      await this.tenantResolutionPolicy.resolveByPhoneNumberId(phoneNumberId);
+    if (resolution.status !== "found") {
+      return;
+    }
+
+    for (const s of statuses) {
+      try {
+        const updated =
+          await this.messageService.updateStatusByExternalMessageId(
+            resolution.tenant.id,
+            s.messageId,
+            s.status
+          );
+        if (!updated) {
+          this.log.debug(
+            { externalMessageId: s.messageId, status: s.status },
+            "status event: outbound não encontrada para atualizar"
+          );
+        }
+      } catch (error) {
+        // Best-effort: falha em atualizar status não deve quebrar o ACK.
+        this.log.error(
+          {
+            err: error,
+            externalMessageId: s.messageId,
+            status: s.status,
+          },
+          "status event: falha ao atualizar status da outbound"
+        );
+      }
+    }
   }
 }

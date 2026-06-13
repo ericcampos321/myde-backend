@@ -79,4 +79,17 @@ export class WhatsAppMessageService {
       replyToMessageId
     );
   }
+
+  /** Atualiza o status de uma outbound pelo wamid (externalMessageId). */
+  async updateStatusByExternalMessageId(
+    tenantId: string,
+    externalMessageId: string,
+    status: string
+  ): Promise<WhatsAppMessageRow | null> {
+    return this.messageRepository.updateStatusByExternalMessageId(
+      tenantId,
+      externalMessageId,
+      status
+    );
+  }
 }

@@ -1,6 +1,20 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { MetaGraphApiClient } from "./MetaGraphApiClient.js";
+import { MetaGraphApiClient, metaModeOf } from "./MetaGraphApiClient.js";
 import { env } from "../../config/env.js";
+
+describe("metaModeOf", () => {
+  it("detecta mock", () => {
+    expect(metaModeOf("http://mock-meta:8001")).toBe("mock");
+    expect(metaModeOf("http://localhost:8001")).toBe("mock");
+    expect(metaModeOf("http://127.0.0.1:8001")).toBe("mock");
+  });
+  it("detecta real", () => {
+    expect(metaModeOf("https://graph.facebook.com/v25.0")).toBe("real");
+  });
+  it("custom para o resto", () => {
+    expect(metaModeOf("https://exemplo.com/api")).toBe("custom");
+  });
+});
 
 describe("MetaGraphApiClient", () => {
   beforeEach(() => {

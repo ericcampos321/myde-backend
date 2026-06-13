@@ -28,7 +28,13 @@ export interface MessageProcessingResult {
     | "message_not_found"
     | "conversation_not_found"
     | "invalid_payload"
-    | "manually_answered";
+    // Motivos da AutoReplyPolicy (quando o auto-reply decide NÃO enviar):
+    | "manually_answered"
+    | "already_auto_replied"
+    | "anti_loop"
+    | "empty_ai_response"
+    | "non_inbound"
+    | "automation_disabled";
 }
 
 export interface EnqueueInboundMessageResult {

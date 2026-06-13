@@ -243,22 +243,36 @@ WHATSAPP_AUTO_REPLY_ENABLED=true   # default: false (só "true" liga)
 
 Com a flag ligada, ao processar um inbound o worker chama o **mesmo**
 `WhatsAppOutboundService` do composer (Meta + persistência), usando o
-`phoneNumberId` do tenant. Garantias:
+`phoneNumberId` do tenant.
 
-- **Idempotência:** a outbound é gravada com `replyToMessageId` = id do inbound;
-  o índice único `(tenantId, replyToMessageId)` + a checagem antes do envio
-  garantem **uma única resposta por inbound**, mesmo em retry do job.
-- **Só responde inbound** (nunca a própria outbound) e **não envia** se a IA
-  devolver texto vazio.
-- **Falha da Meta** é logada de forma segura (sem token) e o job falha/retry.
-- **Human takeover (double-check):** se o operador já respondeu **manualmente** a
-  conversa (outbound com `replyToMessageId IS NULL` criada em/depois do inbound),
-  o worker **não** envia auto-reply. A checagem roda **duas vezes**: antes da IA
-  (economiza a chamada à OpenAI quando o operador respondeu antes) e **de novo,
-  com busca fresh, imediatamente antes do envio** — fechando a janela de corrida
-  em que o operador responde *durante* a geração da IA. Nesses casos o job conclui
-  como `skipped: manually_answered`, sem erro.
-- **Desligada (default):** comportamento inalterado; o composer manual segue igual.
+A decisão "devo auto-responder ESTE inbound?" fica centralizada em
+[`AutoReplyPolicy.decide()`](src/policies/whatsapp/AutoReplyPolicy.ts), que retorna
+`{ shouldReply, reason }` com `reason` ∈ `eligible | automation_disabled |
+non_inbound | anti_loop | manually_answered | already_auto_replied |
+empty_ai_response`. Regras (por inbound X específico):
+
+- **manually_answered:** existe outbound **manual** (`replyToMessageId IS NULL`)
+  com `createdAt >= X.createdAt` → não responde (human takeover). Uma resposta
+  manual **anterior** a X **não** bloqueia: se o cliente escreve de novo (inbound
+  novo), ele volta a ser elegível.
+- **already_auto_replied:** já existe auto-reply para X (`replyToMessageId = X.id`)
+  → não duplica (idempotência; cobre retry do job).
+- **anti_loop:** remetente == número da empresa (`display_phone_number`).
+- **empty_ai_response:** a IA devolveu texto vazio.
+- A política roda **duas vezes**: pré-IA (economiza a chamada à OpenAI quando já
+  não é elegível) e pré-envio com **busca fresh** (fecha a corrida em que o operador
+  responde *durante* a geração da IA). Quando não envia, o job conclui como
+  `skipped` com o `reason`, **sem erro**.
+- **Idempotência de envio:** a outbound é gravada com `replyToMessageId` = id do
+  inbound; o índice único `(tenantId, replyToMessageId)` é a trava final.
+- **Desligada (default):** o worker só gera a sugestão; o composer manual segue igual.
+
+**Decisão de granularidade (debounce):** por simplicidade, o worker responde
+**a cada inbound** (1 job = 1 inbound). Se o cliente manda "olá" / "quero planos" /
+"residenciais" em sequência, cada um gera uma resposta (o histórico é usado como
+contexto). Para produto real, um **debounce por conversa de 2–5s** (coalescing,
+respondendo a última usando o histórico) reduz ruído — fica como evolução, fora do
+escopo do desafio.
 
 ### Persistência dos dados (volumes Docker)
 
@@ -348,6 +362,29 @@ O envio é feito para **`{META_API_BASE_URL}/{phoneNumberId}/messages`** — a b
 
 O cliente envia o header `Authorization: Bearer <META_TOKEN>` nos dois modos; o
 mock simplesmente ignora. Suba o mock com `docker compose --profile mock up -d mock-meta`.
+
+### Diagnóstico de entrega (inbox mostra "enviado" mas não chega no celular)
+
+No boot do cliente Meta sai um log seguro (sem token) deixando o destino explícito:
+
+```
+[meta] outbound client configured { metaMode: "real"|"mock"|"custom", baseUrlHost, phoneNumberId, autoReplyEnabled }
+```
+
+- **`metaMode: "mock"`** → o outbound vai para o `mock-meta` (aparece em `GET /sent`),
+  **nunca** chega num WhatsApp real. Se você quer entrega real, use
+  `META_API_BASE_URL=https://graph.facebook.com/v25.0`.
+- **`metaMode: "real"`** mas a mensagem não chega no celular → quase sempre é
+  **entrega** recusada pela Meta (destinatário não é *test recipient* do app, ou
+  fora da janela de 24h ⇒ exige template). Nesse caso a Meta envia um evento
+  **`statuses[]` com `failed`** no webhook. O backend agora:
+  - **loga** cada status: `webhook status event { externalMessageId, status, errorCode, errorTitle }`
+    (nível `warn` quando `failed`);
+  - **atualiza** o status da outbound por `externalMessageId` (tenant-scoped) →
+    a inbox passa a mostrar **"Não entregue"** em vez de "enviado".
+
+Cada envio também loga `metaMode`, `baseUrlHost`, `phoneNumberId`, `to` (mascarado),
+`status` e `externalMessageId` — nunca token, app secret ou texto completo.
 
 ### Testar via curl
 

@@ -1,10 +1,30 @@
-import { env } from "../../config/env.js";
+import { env, autoReplyEnabled } from "../../config/env.js";
 import { AppError } from "../../errors/AppError.js";
 import { createLogger } from "../../shared/logger/logger.js";
 import { maskPhone } from "../../shared/utils/phone.js";
 import type { SendTextParams, SendTextResult } from "./MetaWhatsAppTypes.js";
 
 const log = createLogger({ module: "meta-graph-api" });
+
+/** Classifica o destino do envio para diagnóstico (mock vs real vs custom). */
+export function metaModeOf(baseUrl: string): "mock" | "real" | "custom" {
+  const u = baseUrl.toLowerCase();
+  if (u.includes("mock-meta") || u.includes("localhost:8001") || u.includes("127.0.0.1:8001")) {
+    return "mock";
+  }
+  if (u.includes("graph.facebook.com")) {
+    return "real";
+  }
+  return "custom";
+}
+
+function hostOf(baseUrl: string): string {
+  try {
+    return new URL(baseUrl).host;
+  } catch {
+    return "invalid-url";
+  }
+}
 
 interface MetaGraphApiErrorResponse {
   error?: {
@@ -63,6 +83,19 @@ export class MetaGraphApiClient {
 
     this.apiBaseUrl = env.META_API_BASE_URL;
     this.accessToken = env.META_TOKEN;
+
+    // Log seguro de configuração (sem token): deixa explícito se o outbound vai
+    // para o mock ou para a Meta real — diagnóstico do "aparece no inbox mas não
+    // chega no WhatsApp" (tipicamente metaMode=mock).
+    log.info(
+      {
+        metaMode: metaModeOf(this.apiBaseUrl),
+        baseUrlHost: hostOf(this.apiBaseUrl),
+        phoneNumberId: env.META_PHONE_NUMBER_ID,
+        autoReplyEnabled,
+      },
+      "[meta] outbound client configured"
+    );
   }
 
   /**
@@ -81,8 +114,14 @@ export class MetaGraphApiClient {
       },
     };
 
+    const baseUrlHost = hostOf(this.apiBaseUrl);
+    const metaMode = metaModeOf(this.apiBaseUrl);
+
     log.info(
       {
+        metaMode,
+        baseUrlHost,
+        phoneNumberId: params.phoneNumberId,
         to: maskPhone(params.to),
         bodyLength: params.body.length,
       },
@@ -111,8 +150,12 @@ export class MetaGraphApiClient {
 
         log.error(
           {
+            metaMode,
+            baseUrlHost,
+            phoneNumberId: params.phoneNumberId,
             to: maskPhone(params.to),
             status: response.status,
+            errorCode: (data as MetaGraphApiErrorResponse).error?.code,
             errorMessage: errorMsg,
           },
           "[meta] send message failed"
@@ -146,7 +189,11 @@ export class MetaGraphApiClient {
 
       log.info(
         {
+          metaMode,
+          baseUrlHost,
+          phoneNumberId: params.phoneNumberId,
           to: maskPhone(params.to),
+          status: response.status,
           externalMessageId,
         },
         "[meta] message sent successfully"

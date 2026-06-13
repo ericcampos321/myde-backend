@@ -91,6 +91,28 @@ export class WhatsAppMessageRepository {
       .orderBy(asc(whatsappMessages.createdAt));
   }
 
+  /**
+   * Atualiza o status de uma mensagem outbound pelo externalMessageId (wamid),
+   * tenant-scoped. Retorna a row atualizada ou null se não encontrada.
+   */
+  async updateStatusByExternalMessageId(
+    tenantId: string,
+    externalMessageId: string,
+    status: string
+  ) {
+    const [message] = await this.database
+      .update(whatsappMessages)
+      .set({ status, updatedAt: new Date() })
+      .where(
+        and(
+          eq(whatsappMessages.tenantId, tenantId),
+          eq(whatsappMessages.externalMessageId, externalMessageId)
+        )
+      )
+      .returning();
+    return message ?? null;
+  }
+
   async findOutboundByReplyToMessageId(
     tenantId: string,
     replyToMessageId: string

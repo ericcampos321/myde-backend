@@ -94,7 +94,7 @@ describe("WhatsAppPayloadMapper", () => {
     });
   });
 
-  it("ignora evento de statuses[] com reason status_event (não unsupported)", () => {
+  it("mapeia evento de statuses[] como kind:status (não unsupported)", () => {
     const result = mapper.map({
       object: "whatsapp_business_account",
       entry: [
@@ -123,6 +123,57 @@ describe("WhatsAppPayloadMapper", () => {
       ],
     });
 
-    expect(result).toEqual({ kind: "ignored", reason: "status_event" });
+    expect(result).toEqual({
+      kind: "status",
+      phoneNumberId: "123456789012345",
+      statuses: [
+        {
+          messageId: "wamid.outbound-1",
+          status: "delivered",
+          errorCode: null,
+          errorTitle: null,
+        },
+      ],
+    });
+  });
+
+  it("mapeia status failed com error code/title", () => {
+    const result = mapper.map({
+      object: "whatsapp_business_account",
+      entry: [
+        {
+          id: "WABA_TESTE_0001",
+          changes: [
+            {
+              field: "messages",
+              value: {
+                metadata: { phone_number_id: "123456789012345" },
+                statuses: [
+                  {
+                    id: "wamid.outbound-2",
+                    status: "failed",
+                    errors: [
+                      { code: 131026, title: "Message undeliverable" },
+                    ],
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(result).toMatchObject({
+      kind: "status",
+      statuses: [
+        {
+          messageId: "wamid.outbound-2",
+          status: "failed",
+          errorCode: 131026,
+          errorTitle: "Message undeliverable",
+        },
+      ],
+    });
   });
 });

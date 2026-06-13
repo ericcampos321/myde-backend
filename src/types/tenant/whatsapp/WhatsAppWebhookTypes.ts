@@ -24,9 +24,23 @@ export interface NormalizedInboundMessage {
   timestamp: Date;
 }
 
+/** Status de entrega de uma mensagem OUTBOUND (sent/delivered/read/failed). */
+export interface NormalizedMessageStatus {
+  /** wamid da mensagem outbound (= externalMessageId persistido). */
+  messageId: string;
+  status: string;
+  errorCode: number | null;
+  errorTitle: string | null;
+}
+
 export type MetaWebhookMappingResult =
   | { kind: "message"; message: NormalizedInboundMessage }
-  | { kind: "ignored"; reason: "unsupported_event" | "status_event" };
+  | {
+      kind: "status";
+      phoneNumberId: string | null;
+      statuses: NormalizedMessageStatus[];
+    }
+  | { kind: "ignored"; reason: "unsupported_event" };
 
 export type MetaWebhookAckResponse =
   | {

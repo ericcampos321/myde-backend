@@ -37,11 +37,17 @@ export interface InboxConversationSummary {
   lastMessageAt: string;
 }
 
+export type InboxMessageStatus =
+  | "sent"
+  | "delivered"
+  | "read"
+  | "failed";
+
 export interface InboxMessageDto {
   id: string;
   direction: "in" | "out";
   body: string;
-  status: "sent" | "delivered" | "read";
+  status: InboxMessageStatus;
   createdAt: string;
 }
 
@@ -261,15 +267,19 @@ function findLastInboundMessageIndex(
   return -1;
 }
 
-function normalizeMessageStatus(
-  status: string
-): "sent" | "delivered" | "read" {
+function normalizeMessageStatus(status: string): InboxMessageStatus {
   if (status === "read") {
     return "read";
   }
 
   if (status === "delivered") {
     return "delivered";
+  }
+
+  // A Meta marca entrega falha via webhook statuses[] → persistimos "failed".
+  // Não mascaramos como "sent": a UI deve distinguir.
+  if (status === "failed") {
+    return "failed";
   }
 
   return "sent";

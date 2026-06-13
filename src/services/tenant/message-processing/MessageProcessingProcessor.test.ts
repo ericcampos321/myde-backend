@@ -144,7 +144,7 @@ describe("MessageProcessingProcessor", () => {
     });
   });
 
-  it("auto-reply LIGADO mas IA vazia: não envia outbound", async () => {
+  it("auto-reply LIGADO mas IA vazia: skipped empty_ai_response, não envia", async () => {
     const sendMessage = vi.fn();
     const processor = buildProcessorWithAutoReply({
       autoReplyEnabled: true,
@@ -154,7 +154,7 @@ describe("MessageProcessingProcessor", () => {
 
     const result = await processor.processMessageJob(job);
 
-    expect(result.processed).toBe(true);
+    expect(result).toMatchObject({ skipped: true, reason: "empty_ai_response" });
     expect(sendMessage).not.toHaveBeenCalled();
   });
 
@@ -204,7 +204,7 @@ describe("MessageProcessingProcessor", () => {
       displayPhoneNumber: "5515991270311",
     });
 
-    expect(result.processed).toBe(true);
+    expect(result).toMatchObject({ skipped: true, reason: "anti_loop" });
     expect(sendMessage).not.toHaveBeenCalled();
   });
 
@@ -371,21 +371,25 @@ describe("MessageProcessingProcessor", () => {
       expect(sendMessage).toHaveBeenCalledTimes(1);
     });
 
-    it("(d) outbound auto-reply (replyToMessageId != null) NÃO conta como takeover", async () => {
+    it("(d) auto-reply já existente para o inbound: NÃO conta como manual, mas idempotência (already_auto_replied) impede reenvio", async () => {
       const sendMessage = vi.fn().mockResolvedValue({ id: "out-1" });
       const { processor } = build({
         conversationMessages: [
           inbound,
-          out({ id: "auto-1", replyToMessageId: "message-1" }), // auto-reply
+          out({ id: "auto-1", replyToMessageId: "message-1" }), // auto-reply DESTE inbound
         ],
         sendMessage,
       });
 
-      await processor.processMessageJob(job);
+      const result = await processor.processMessageJob(job);
 
-      // Não é bloqueado pelo takeover (é auto-reply, não manual). A idempotência
-      // real de duplicidade é tratada no WhatsAppOutboundService.
-      expect(sendMessage).toHaveBeenCalledTimes(1);
+      // Não é "manually_answered" (auto-reply não é manual); é idempotência:
+      // já existe resposta automática para este inbound (ex.: retry do job).
+      expect(result).toMatchObject({
+        skipped: true,
+        reason: "already_auto_replied",
+      });
+      expect(sendMessage).not.toHaveBeenCalled();
     });
 
     it("(b2) operador responde DURANTE a IA: chama IA mas NÃO envia (2ª checagem)", async () => {

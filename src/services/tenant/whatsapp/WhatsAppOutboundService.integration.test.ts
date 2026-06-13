@@ -14,6 +14,7 @@ import {
   WhatsAppOutboundService,
   type MetaOutboundClient,
 } from "./WhatsAppOutboundService.js";
+import { WhatsAppMessageRepository } from "../../../repositories/tenant/whatsapp/index.js";
 
 const runDatabaseTests = process.env.RUN_DB_TESTS === "true";
 const describeDatabase = runDatabaseTests ? describe : describe.skip;
@@ -161,6 +162,89 @@ describeDatabase("WhatsAppOutboundService (integração persistência)", () => {
         text: "teste",
       })
     ).rejects.toMatchObject({ code: "TENANT_NOT_FOUND" });
+  });
+
+  it("atualiza status da outbound por externalMessageId (statuses[] failed), tenant-scoped", async () => {
+    const repo = new WhatsAppMessageRepository(database);
+    const wamid = `${marker}-status-wamid`;
+    await database.insert(whatsappMessages).values({
+      tenantId,
+      conversationId,
+      direction: "outbound",
+      body: "mensagem para status",
+      status: "sent",
+      externalMessageId: wamid,
+    });
+
+    // Tenant errado NÃO atualiza (isolamento).
+    const wrong = await repo.updateStatusByExternalMessageId(
+      otherTenantId,
+      wamid,
+      "failed"
+    );
+    expect(wrong).toBeNull();
+
+    // Tenant certo atualiza para "failed".
+    const updated = await repo.updateStatusByExternalMessageId(
+      tenantId,
+      wamid,
+      "failed"
+    );
+    expect(updated?.status).toBe("failed");
+
+    const [row] = await database
+      .select()
+      .from(whatsappMessages)
+      .where(
+        and(
+          eq(whatsappMessages.tenantId, tenantId),
+          eq(whatsappMessages.externalMessageId, wamid)
+        )
+      );
+    expect(row?.status).toBe("failed");
+  });
+
+  it("falha da Meta NÃO persiste outbound (Meta primeiro)", async () => {
+    const failingMeta: MetaOutboundClient = {
+      async sendText() {
+        throw new Error("meta indisponível");
+      },
+    };
+    const service = new WhatsAppOutboundService({ metaClient: failingMeta });
+
+    const before = await database
+      .select()
+      .from(whatsappMessages)
+      .where(
+        and(
+          eq(whatsappMessages.tenantId, tenantId),
+          eq(whatsappMessages.direction, "outbound")
+        )
+      );
+
+    await expect(
+      service.sendMessage({
+        tenantId,
+        conversationId,
+        text: "não deveria persistir",
+      })
+    ).rejects.toBeTruthy();
+
+    const after = await database
+      .select()
+      .from(whatsappMessages)
+      .where(
+        and(
+          eq(whatsappMessages.tenantId, tenantId),
+          eq(whatsappMessages.direction, "outbound")
+        )
+      );
+
+    // Nenhuma outbound nova foi gravada (não fica "sent" sem envio real).
+    expect(after.length).toBe(before.length);
+    expect(
+      after.some((m) => m.body === "não deveria persistir")
+    ).toBe(false);
   });
 
   it("idempotência: replyToMessageId repetido envia à Meta só uma vez", async () => {

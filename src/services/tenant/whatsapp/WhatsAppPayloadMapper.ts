@@ -24,7 +24,11 @@ interface MetaWebhookPayload {
           text?: { body?: unknown };
         }>;
         // Eventos de status de entrega de outbound (sent/delivered/read/failed).
-        statuses?: Array<unknown>;
+        statuses?: Array<{
+          id?: unknown;
+          status?: unknown;
+          errors?: Array<{ code?: unknown; title?: unknown; message?: unknown }>;
+        }>;
       };
     }>;
   }>;
@@ -62,11 +66,26 @@ export class WhatsAppPayloadMapper {
       timestampSeconds;
 
     if (!isProcessableText) {
-      // Evento de status de entrega de outbound: ignorar com motivo próprio
-      // (não é "unsupported"; é esperado e não-processável). Nunca vira erro.
-      const statuses = value?.statuses;
-      if (Array.isArray(statuses) && statuses.length > 0) {
-        return { kind: "ignored", reason: "status_event" };
+      // Evento de status de entrega de outbound: extrai os status para log/diagnóstico
+      // (sent/delivered/read/failed). Não é "unsupported"; é esperado e não vira erro.
+      const rawStatuses = value?.statuses;
+      if (Array.isArray(rawStatuses) && rawStatuses.length > 0) {
+        const statuses = rawStatuses
+          .map((s) => {
+            const messageId = nonEmptyString(s?.id);
+            const status = nonEmptyString(s?.status);
+            if (!messageId || !status) return null;
+            const firstError = s?.errors?.[0];
+            const errorCode =
+              typeof firstError?.code === "number" ? firstError.code : null;
+            const errorTitle =
+              nonEmptyString(firstError?.title) ??
+              nonEmptyString(firstError?.message);
+            return { messageId, status, errorCode, errorTitle };
+          })
+          .filter((s): s is NonNullable<typeof s> => s !== null);
+
+        return { kind: "status", phoneNumberId, statuses };
       }
       return { kind: "ignored", reason: "unsupported_event" };
     }
