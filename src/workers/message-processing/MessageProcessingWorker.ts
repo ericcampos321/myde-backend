@@ -11,6 +11,7 @@ import {
   WORKER_MAX_STALLED_COUNT,
   WORKER_STALLED_INTERVAL_MS,
 } from "../../config/defaults/worker-defaults.js";
+import { autoReplyEnabled } from "../../config/env.js";
 import { getRedisConnectionOptions } from "../../infrastructure/index.js";
 import { closeDb } from "../../db/client.js";
 import { createLogger } from "../../shared/logger/logger.js";
@@ -136,6 +137,7 @@ async function bootstrap(): Promise<void> {
       jobName: PROCESS_INBOUND_MESSAGE_JOB,
       concurrency: WORKER_CONCURRENCY,
       aiProvider: aiResponseService.source,
+      autoReplyEnabled,
     },
     "worker de processamento iniciado"
   );

@@ -1,17 +1,10 @@
 import { env } from "../../config/env.js";
 import { AppError } from "../../errors/AppError.js";
 import { createLogger } from "../../shared/logger/logger.js";
+import { maskPhone } from "../../shared/utils/phone.js";
 import type { SendTextParams, SendTextResult } from "./MetaWhatsAppTypes.js";
 
 const log = createLogger({ module: "meta-graph-api" });
-
-/** Mascara o telefone para logs (LGPD): mantém só os 4 últimos dígitos. */
-function maskPhone(phone: string): string {
-  if (phone.length <= 4) {
-    return "****";
-  }
-  return `****${phone.slice(-4)}`;
-}
 
 interface MetaGraphApiErrorResponse {
   error?: {

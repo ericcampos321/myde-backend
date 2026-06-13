@@ -8,7 +8,10 @@ interface MetaWebhookPayload {
     id?: unknown;
     changes?: Array<{
       value?: {
-        metadata?: { phone_number_id?: unknown };
+        metadata?: {
+          phone_number_id?: unknown;
+          display_phone_number?: unknown;
+        };
         contacts?: Array<{
           wa_id?: unknown;
           profile?: { name?: unknown };
@@ -37,6 +40,9 @@ export class WhatsAppPayloadMapper {
     const contact = value?.contacts?.[0];
 
     const phoneNumberId = nonEmptyString(value?.metadata?.phone_number_id);
+    const displayPhoneNumber = nonEmptyString(
+      value?.metadata?.display_phone_number
+    );
     const wabaId = nonEmptyString(entry?.id);
     const externalMessageId = nonEmptyString(message?.id);
     const contactPhone =
@@ -63,6 +69,7 @@ export class WhatsAppPayloadMapper {
 
     const normalized: NormalizedInboundMessage = {
       phoneNumberId,
+      displayPhoneNumber,
       wabaId,
       externalMessageId,
       contactPhone,

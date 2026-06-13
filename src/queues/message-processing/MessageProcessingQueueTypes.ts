@@ -9,6 +9,12 @@ export type MessageProcessingJobPayload = {
   externalMessageId: string;
   phoneNumberId: string;
   contactPhone: string;
+  /**
+   * Telefone real exibido da empresa (`metadata.display_phone_number`), quando
+   * disponível. Usado pela trava anti-loop do auto-reply. Opcional para manter
+   * compatibilidade com jobs já enfileirados antes desta versão.
+   */
+  displayPhoneNumber?: string | null;
 };
 
 export interface MessageProcessingResult {

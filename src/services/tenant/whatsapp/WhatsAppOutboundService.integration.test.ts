@@ -162,4 +162,61 @@ describeDatabase("WhatsAppOutboundService (integração persistência)", () => {
       })
     ).rejects.toMatchObject({ code: "TENANT_NOT_FOUND" });
   });
+
+  it("idempotência: replyToMessageId repetido envia à Meta só uma vez", async () => {
+    // Meta client local: id único por chamada (evita colidir com outros testes)
+    // e conta quantas vezes a Meta foi efetivamente chamada.
+    let metaCalls = 0;
+    const localMeta: MetaOutboundClient = {
+      async sendText() {
+        metaCalls += 1;
+        return { externalMessageId: `${marker}-reply-${metaCalls}` };
+      },
+    };
+    const service = new WhatsAppOutboundService({ metaClient: localMeta });
+
+    // Cria um inbound para servir de origem (replyToMessageId é FK p/ messages).
+    const [inbound] = await database
+      .insert(whatsappMessages)
+      .values({
+        tenantId,
+        conversationId,
+        direction: "inbound",
+        body: "oi, me ajuda?",
+        status: "received",
+        externalMessageId: `${marker}-inbound`,
+      })
+      .returning();
+
+    const first = await service.sendMessage({
+      tenantId,
+      conversationId,
+      text: "Resposta automática",
+      replyToMessageId: inbound!.id,
+    });
+
+    // Segunda chamada simula retry do job com o mesmo inbound.
+    const second = await service.sendMessage({
+      tenantId,
+      conversationId,
+      text: "Resposta automática",
+      replyToMessageId: inbound!.id,
+    });
+
+    // Meta chamada apenas UMA vez; a 2ª retorna a mesma outbound (idempotente).
+    expect(metaCalls).toBe(1);
+    expect(second.id).toBe(first.id);
+
+    // Existe exatamente uma outbound respondendo a esse inbound.
+    const replies = await database
+      .select()
+      .from(whatsappMessages)
+      .where(
+        and(
+          eq(whatsappMessages.tenantId, tenantId),
+          eq(whatsappMessages.replyToMessageId, inbound!.id)
+        )
+      );
+    expect(replies.length).toBe(1);
+  });
 });

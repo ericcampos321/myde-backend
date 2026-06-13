@@ -13,7 +13,10 @@ describe("WhatsAppPayloadMapper", () => {
           changes: [
             {
               value: {
-                metadata: { phone_number_id: "123456789012345" },
+                metadata: {
+                  phone_number_id: "123456789012345",
+                  display_phone_number: "+55 15 99127-0311",
+                },
                 contacts: [
                   {
                     profile: { name: "Cliente Teste" },
@@ -40,6 +43,7 @@ describe("WhatsAppPayloadMapper", () => {
       kind: "message",
       message: {
         phoneNumberId: "123456789012345",
+        displayPhoneNumber: "+55 15 99127-0311",
         wabaId: "WABA_TESTE_0001",
         externalMessageId: "wamid.mapper-1",
         contactPhone: "5511999990000",
@@ -47,6 +51,39 @@ describe("WhatsAppPayloadMapper", () => {
         text: "Quais sao os planos?",
         timestamp: new Date(1760000000 * 1000),
       },
+    });
+  });
+
+  it("mapeia displayPhoneNumber como null quando ausente no metadata", () => {
+    const result = mapper.map({
+      object: "whatsapp_business_account",
+      entry: [
+        {
+          id: "WABA_TESTE_0002",
+          changes: [
+            {
+              value: {
+                metadata: { phone_number_id: "123456789012345" },
+                contacts: [{ wa_id: "5511988887777" }],
+                messages: [
+                  {
+                    from: "5511988887777",
+                    id: "wamid.mapper-2",
+                    timestamp: "1760000000",
+                    type: "text",
+                    text: { body: "oi" },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(result).toMatchObject({
+      kind: "message",
+      message: { displayPhoneNumber: null, phoneNumberId: "123456789012345" },
     });
   });
 

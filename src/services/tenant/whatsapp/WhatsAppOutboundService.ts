@@ -43,6 +43,14 @@ export interface SendMessageInput {
   tenantId: string;
   conversationId: string;
   text: string;
+  /**
+   * Quando presente (ex.: auto-reply do worker), amarra a mensagem outbound à
+   * mensagem inbound que a originou. Serve de chave de idempotência: o índice
+   * único (tenantId, replyToMessageId) garante uma única resposta por inbound,
+   * e checamos a existência ANTES de chamar a Meta para não enviar duplicado em
+   * retry. O fluxo manual do composer não envia este campo.
+   */
+  replyToMessageId?: string;
 }
 
 export interface SendMessageOutput {
@@ -130,12 +138,34 @@ export class WhatsAppOutboundService {
       });
     }
 
+    // Idempotência (auto-reply): se já existe uma outbound respondendo a este
+    // inbound, NÃO reenvia à Meta — retorna a resposta já enviada. Cobre retry
+    // de job com o mesmo replyToMessageId sem mandar mensagem duplicada.
+    if (input.replyToMessageId) {
+      const existing = await this.findReplyOutbound(
+        tenant.id,
+        input.replyToMessageId
+      );
+      if (existing) {
+        log.info(
+          {
+            tenantId: tenant.id,
+            conversationId: input.conversationId,
+            replyToMessageId: input.replyToMessageId,
+          },
+          "[outbound] auto-reply já enviado — ignorando (idempotente)"
+        );
+        return this.toOutput(existing);
+      }
+    }
+
     log.info(
       {
         tenantId: tenant.id,
         conversationId: input.conversationId,
         contactId: contact.id,
         textLength: text.length,
+        autoReply: Boolean(input.replyToMessageId),
       },
       "[outbound] sending message via Meta"
     );
@@ -168,10 +198,15 @@ export class WhatsAppOutboundService {
       conversationId: input.conversationId,
       body: text,
       externalMessageId,
+      replyToMessageId: input.replyToMessageId ?? null,
     });
 
     await this.updateConversationLastMessage(tenant.id, input.conversationId);
 
+    return this.toOutput(message);
+  }
+
+  private toOutput(message: WhatsAppMessageRow): SendMessageOutput {
     return {
       id: message.id,
       conversationId: message.conversationId,
@@ -181,6 +216,25 @@ export class WhatsAppOutboundService {
       externalMessageId: message.externalMessageId,
       createdAt: message.createdAt,
     };
+  }
+
+  /** Procura uma outbound já enviada como resposta a um inbound (idempotência). */
+  private async findReplyOutbound(
+    tenantId: string,
+    replyToMessageId: string
+  ): Promise<WhatsAppMessageRow | null> {
+    const result = await db
+      .select()
+      .from(whatsappMessages)
+      .where(
+        and(
+          eq(whatsappMessages.tenantId, tenantId),
+          eq(whatsappMessages.replyToMessageId, replyToMessageId)
+        )
+      )
+      .limit(1);
+
+    return result[0] ?? null;
   }
 
   private async getTenant(tenantId: string): Promise<TenantRow | null> {
@@ -234,6 +288,7 @@ export class WhatsAppOutboundService {
     conversationId: string;
     body: string;
     externalMessageId: string | null;
+    replyToMessageId: string | null;
   }): Promise<WhatsAppMessageRow> {
     const newMessage: NewWhatsAppMessageRow = {
       tenantId: params.tenantId,
@@ -242,6 +297,7 @@ export class WhatsAppOutboundService {
       body: params.body,
       status: "sent",
       externalMessageId: params.externalMessageId,
+      replyToMessageId: params.replyToMessageId,
     };
 
     const result = await db

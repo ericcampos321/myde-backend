@@ -20,6 +20,7 @@ import { WhatsAppPayloadMapper } from "./WhatsAppPayloadMapper.js";
 import { WhatsAppSignatureService } from "./WhatsAppSignatureService.js";
 import { TenantResolutionPolicy } from "../../../policies/tenant/index.js";
 import { WebhookDeliveryPolicy } from "../../../policies/webhook/index.js";
+import { maskPhone } from "../../../shared/utils/phone.js";
 import type {
   MetaWebhookAckResponse,
   MetaWebhookHeaders,
@@ -150,7 +151,7 @@ export class WhatsAppWebhookService {
     });
     if (!contact) {
       this.log.error(
-        { phone: inbound.contactPhone, tenantId: tenant.id },
+        { phone: maskPhone(inbound.contactPhone), tenantId: tenant.id },
         "failed to upsert contact"
       );
       throw new AppError({
@@ -197,6 +198,7 @@ export class WhatsAppWebhookService {
         externalMessageId: inbound.externalMessageId,
         phoneNumberId: inbound.phoneNumberId,
         contactPhone: inbound.contactPhone,
+        displayPhoneNumber: inbound.displayPhoneNumber,
       });
     } catch (error) {
       this.log.error(

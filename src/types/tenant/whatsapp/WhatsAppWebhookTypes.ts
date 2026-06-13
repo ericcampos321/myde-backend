@@ -10,6 +10,12 @@ export interface MetaWebhookHeaders {
 
 export interface NormalizedInboundMessage {
   phoneNumberId: string;
+  /**
+   * Telefone REAL exibido da empresa (`metadata.display_phone_number`), quando a
+   * Meta envia. Diferente de `phoneNumberId` (ID técnico). Usado na trava
+   * anti-loop do auto-reply. Pode vir ausente em alguns eventos.
+   */
+  displayPhoneNumber: string | null;
   wabaId: string;
   externalMessageId: string;
   contactPhone: string;

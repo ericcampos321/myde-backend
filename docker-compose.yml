@@ -34,10 +34,12 @@ services:
       - myde_redis_data:/var/lib/redis/data
 
   # LEGADO/OPCIONAL — simulador da Meta para testes manuais offline.
-  # NÃO é o ambiente padrão e NÃO sobe com `docker compose up -d postgres redis`.
-  # O fluxo principal usa a Meta WhatsApp Cloud API real (ambiente de teste).
-  # Suba sob demanda: `docker compose up -d mock-meta`.
+  # Isolado atrás do profile "mock": NÃO sobe com `docker compose up -d` nem
+  # com `docker compose up -d postgres redis`. O fluxo principal usa a Meta
+  # WhatsApp Cloud API real (ambiente de teste).
+  # Suba sob demanda apenas: `docker compose --profile mock up -d mock-meta`.
   mock-meta:
+    profiles: ["mock"]
     build: ./mock-meta-server
     ports:
       - "8001:8001"

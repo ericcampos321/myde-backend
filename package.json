@@ -18,7 +18,8 @@
     "test:watch": "vitest",
     "db:generate": "tsx node_modules/drizzle-kit/bin.cjs generate",
     "db:migrate": "tsx node_modules/drizzle-kit/bin.cjs migrate",
-    "db:seed": "tsx src/db/seeds/seedDefaultTenant.ts"
+    "db:seed": "tsx src/db/seeds/seedDefaultTenant.ts",
+    "db:studio": "tsx node_modules/drizzle-kit/bin.cjs studio"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.1",

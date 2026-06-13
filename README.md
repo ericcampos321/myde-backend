@@ -12,15 +12,15 @@ mensagens, processa de forma assíncrona com uma LLM e prepara a resposta IA.
 
 ## Stack
 
-| Camada | Tecnologia |
-|---|---|
-| API HTTP | Fastify + TypeScript |
-| Persistência | PostgreSQL + Drizzle ORM |
-| Fila | Redis + BullMQ |
-| Worker | Processo dedicado, separado da API |
-| IA | OpenAI atrás de interface (`OpenAiProvider`); stub apenas em `NODE_ENV=test` |
-| Logs | Pino (estruturado) |
-| Testes | Vitest |
+| Camada       | Tecnologia                                                                   |
+| ------------ | ---------------------------------------------------------------------------- |
+| API HTTP     | Fastify + TypeScript                                                         |
+| Persistência | PostgreSQL + Drizzle ORM                                                     |
+| Fila         | Redis + BullMQ                                                               |
+| Worker       | Processo dedicado, separado da API                                           |
+| IA           | OpenAI atrás de interface (`OpenAiProvider`); stub apenas em `NODE_ENV=test` |
+| Logs         | Pino (estruturado)                                                           |
+| Testes       | Vitest                                                                       |
 
 **Decisões:** PostgreSQL é a fonte da verdade; Redis/BullMQ é apenas dispatch.
 Sem SQS, sem LocalStack. Tenant resolvido por `metadata.phone_number_id` /
@@ -86,10 +86,10 @@ conhece o banco.
   O `drizzle-kit` lê os arquivos via `tsx` (scripts `db:generate`/`db:migrate`),
   pois resolve os imports `.js` entre os arquivos de schema do NodeNext.
 - **`schemas/**`** — apenas validação runtime (Zod ou JSON-schema Fastify):
-  request body, params, query, payload externo da Meta, payload de fila,
-  resposta pública. Pode exportar o tipo via `z.infer`.
+request body, params, query, payload externo da Meta, payload de fila,
+resposta pública. Pode exportar o tipo via `z.infer`.
 - **`types/**`** — apenas contratos TS que não vêm do Drizzle nem do Zod
-  (ex.: `Upsert*Input` derivado de `New*Row`, contratos do webhook Meta).
+(ex.: `Upsert*Input`derivado de`New*Row`, contratos do webhook Meta).
 - **DTO** — criado só quando a resposta pública difere da row do banco;
   preferir `ResponseSchema` + `z.infer`. Sem pasta global `dtos/`.
 - **Repositories** retornam rows do Drizzle; **services** recebem inputs de
@@ -101,6 +101,50 @@ conhece o banco.
 
 > **Portas locais:** Postgres `5432`, **Redis `6380`** (externo — mapeado para
 > `6379` dentro do Docker, evitando conflito com Redis de outros projetos).
+
+### Fluxo recomendado no Windows
+
+Se você está no Windows, use **PowerShell** e siga esta ordem:
+
+1. Dentro de `myde-backend`:
+
+```powershell
+.\scripts\dev\up-infra.ps1
+```
+
+2. Ainda dentro de `myde-backend`, em outra janela:
+
+```powershell
+npm run dev
+```
+
+3. Ainda dentro de `myde-backend`, em outra janela:
+
+```powershell
+npm run dev:worker
+```
+
+4. Vá para `myde-frontend`, em outra janela:
+
+```powershell
+Set-Location ..\myde-frontend
+npm run dev
+```
+
+5. Para testar webhook real da Meta:
+
+```powershell
+Set-Location ..\myde-backend
+cloudflared tunnel --url http://localhost:8000
+```
+
+6. Para diagnosticar:
+
+```powershell
+.\scripts\dev\check-local.ps1
+```
+
+Se preferir Bash/Git Bash, veja também `scripts/dev/README.md`.
 
 ### Fluxo local
 
@@ -135,13 +179,13 @@ npm run dev:worker
 
 Para os **fluxos reais** de IA e Meta, preencha no `.env` local:
 
-| Variável | Necessária para |
-|---|---|
-| `OPENAI_API_KEY` | Gerar respostas de IA reais (`OpenAiProvider`) |
-| `META_VERIFY_TOKEN` | Handshake de verificação do webhook |
-| `META_APP_SECRET` | Validar a assinatura `X-Hub-Signature-256` dos webhooks |
-| `META_TOKEN` | Enviar mensagens via Graph API (outbound futuro) |
-| `META_PHONE_NUMBER_ID` | Identificar o número de origem |
+| Variável               | Necessária para                                         |
+| ---------------------- | ------------------------------------------------------- |
+| `OPENAI_API_KEY`       | Gerar respostas de IA reais (`OpenAiProvider`)          |
+| `META_VERIFY_TOKEN`    | Handshake de verificação do webhook                     |
+| `META_APP_SECRET`      | Validar a assinatura `X-Hub-Signature-256` dos webhooks |
+| `META_TOKEN`           | Enviar mensagens via Graph API (outbound futuro)        |
+| `META_PHONE_NUMBER_ID` | Identificar o número de origem                          |
 
 - Sem `OPENAI_API_KEY`, o worker **falha com erro de configuração explícito** em
   desenvolvimento/produção (o `StubAiProvider` só é usado em `NODE_ENV=test`).
@@ -177,7 +221,7 @@ Body:    { "text": "mensagem a enviar" }
 
 Fluxo: o backend valida a conversa/contato/tenant, chama a **Meta Graph API**
 (`POST /{phoneNumberId}/messages`) usando o `phoneNumberId` **do tenant**, e só
-então persiste a mensagem outbound (estratégia *Meta primeiro* — se a Meta falhar,
+então persiste a mensagem outbound (estratégia _Meta primeiro_ — se a Meta falhar,
 nada é gravado). O frontend nunca chama a Meta diretamente; apenas este endpoint.
 
 > ⚠️ **`X-Tenant-ID` é uma simplificação de DEV/desafio** (não há auth). O
@@ -185,18 +229,58 @@ nada é gravado). O frontend nunca chama a Meta diretamente; apenas este endpoin
 > precisa pertencer ao tenant. Em **produção**, troque o header por auth/JWT/sessão
 > e derive o tenant da identidade autenticada.
 
-### Mock da Meta (legado/opcional — não é o ambiente padrão)
+### Auto-resposta opcional (worker → Meta)
+
+Por padrão o worker **apenas gera** a sugestão de IA; quem envia a resposta ao
+cliente é o operador, pelo composer (`POST /conversations/:id/messages`).
+
+Para ligar a **auto-resposta** (o worker envia a resposta da IA automaticamente
+após o inbound), defina no `.env`:
+
+```env
+WHATSAPP_AUTO_REPLY_ENABLED=true   # default: false (só "true" liga)
+```
+
+Com a flag ligada, ao processar um inbound o worker chama o **mesmo**
+`WhatsAppOutboundService` do composer (Meta + persistência), usando o
+`phoneNumberId` do tenant. Garantias:
+
+- **Idempotência:** a outbound é gravada com `replyToMessageId` = id do inbound;
+  o índice único `(tenantId, replyToMessageId)` + a checagem antes do envio
+  garantem **uma única resposta por inbound**, mesmo em retry do job.
+- **Só responde inbound** (nunca a própria outbound) e **não envia** se a IA
+  devolver texto vazio.
+- **Falha da Meta** é logada de forma segura (sem token) e o job falha/retry.
+- **Desligada (default):** comportamento inalterado; o composer manual segue igual.
+
+### Persistência dos dados (volumes Docker)
+
+PostgreSQL é a fonte da verdade e usa o **volume nomeado `myde_pg_data`**, então os
+dados (tenants, contatos, conversas, mensagens) **sobrevivem** a restart de backend,
+worker, frontend e Redis, e a `docker compose down`/`stop`.
+
+| Comando                                  | Efeito nos dados                          |
+| ---------------------------------------- | ----------------------------------------- |
+| `docker compose stop` / `down`           | ✅ **preserva** o banco (volume mantido)  |
+| restart de backend/worker/frontend/Redis | ✅ **preserva** o banco                   |
+| `docker compose down -v`                 | ⚠️ **APAGA** o banco e todas as conversas |
+
+Nenhum código de aplicação (webhook, inbox, worker, seed) apaga dados — o `seed` é
+idempotente (`upsert`). **Não** use `down -v` no fluxo normal. Para inspecionar o
+banco sem expor segredos: `npm run db:studio`.
+
+### Mock da Meta (legado/opcional — isolado por profile)
 
 > O caminho padrão é a **Meta real de teste** (acima). O `mock-meta` é apenas uma
 > ferramenta auxiliar legada para testes manuais offline — **não** representa o
 > ambiente padrão e não é necessário no fluxo principal.
 
-O `docker-compose.yml` ainda inclui o serviço `mock-meta` (porta `8001`). Ele não
-sobe com `docker compose up -d postgres redis`; para usá-lo, suba explicitamente e
-aponte o `.env` para ele:
+O serviço `mock-meta` está atrás do **profile `mock`**, então **não sobe** com
+`docker compose up -d` nem com `docker compose up -d postgres redis`. Para usá-lo,
+suba explicitamente com o profile e aponte o `.env` para ele:
 
 ```bash
-docker compose up -d mock-meta
+docker compose --profile mock up -d mock-meta
 # no .env (apenas para esse modo legado):  META_API_BASE_URL=http://localhost:8001
 ```
 
@@ -226,6 +310,11 @@ RUN_DB_TESTS=true npm test
 RUN_REDIS_TESTS=true npm test
 ```
 
+> ⚠️ A suíte `RUN_REDIS_TESTS` sobe seu próprio worker e assume **acesso
+> exclusivo** à fila `message-processing`. Pare o `npm run dev:worker` antes de
+> rodá-la — um worker ativo consome/trava os jobs do teste e causa falhas do tipo
+> _"locked by another worker"_ (não é regressão).
+
 PostgreSQL permanece a fonte da verdade. Redis/BullMQ será adicionado apenas
 como dispatch idempotente por `externalMessageId`; SQS e LocalStack não fazem
 parte da solução.
@@ -252,16 +341,16 @@ mas ainda não persiste mensagem outbound nem chama a Meta para envio.
 
 ## Scripts
 
-| Script | Descrição |
-|---|---|
-| `dev` | API em watch (`src/bootstrap/server.ts`) |
-| `dev:worker` | Worker dedicado em watch |
-| `build` | Compila para `dist/` (tsc) |
-| `start` / `start:worker` | Roda o build de produção |
-| `typecheck` | `tsc --noEmit` |
-| `test` / `test:watch` | Vitest |
-| `db:generate` / `db:migrate` | Gera e aplica migrations Drizzle |
-| `db:seed` | Cria ou atualiza o tenant padrão NeoFibra |
+| Script                       | Descrição                                 |
+| ---------------------------- | ----------------------------------------- |
+| `dev`                        | API em watch (`src/bootstrap/server.ts`)  |
+| `dev:worker`                 | Worker dedicado em watch                  |
+| `build`                      | Compila para `dist/` (tsc)                |
+| `start` / `start:worker`     | Roda o build de produção                  |
+| `typecheck`                  | `tsc --noEmit`                            |
+| `test` / `test:watch`        | Vitest                                    |
+| `db:generate` / `db:migrate` | Gera e aplica migrations Drizzle          |
+| `db:seed`                    | Cria ou atualiza o tenant padrão NeoFibra |
 
 ---
 
@@ -271,6 +360,7 @@ Todas validadas em `src/config/env.ts` (única leitura de `process.env`).
 O `.env.example` é o template com os segredos em branco; o setup real é preenchido
 no `.env` local (gitignored) — nunca commite segredos.
 
-`NODE_ENV`, `PORT` (8000), `HOST` (0.0.0.0), `LOG_LEVEL`, `DATABASE_URL`,
-`REDIS_URL`, `META_VERIFY_TOKEN`, `META_APP_SECRET`, `META_TOKEN`,
-`META_API_BASE_URL`, `META_PHONE_NUMBER_ID`, `OPENAI_API_KEY`, `OPENAI_MODEL`.
+`NODE_ENV`, `PORT` (8000), `HOST` (0.0.0.0), `LOG_LEVEL`, `CORS_ORIGINS`,
+`DATABASE_URL`, `REDIS_URL`, `META_VERIFY_TOKEN`, `META_APP_SECRET`, `META_TOKEN`,
+`META_API_BASE_URL`, `META_PHONE_NUMBER_ID`, `OPENAI_API_KEY`, `OPENAI_MODEL`,
+`WHATSAPP_AUTO_REPLY_ENABLED` (default `false`).

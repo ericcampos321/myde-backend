@@ -59,6 +59,14 @@ const envSchema = z.object({
 
   OPENAI_API_KEY: z.string().optional(),
   OPENAI_MODEL: z.string().min(1).default("gpt-5.4"),
+
+  // Auto-resposta opcional do worker: quando "true", após gerar a sugestão de IA
+  // o worker envia a resposta ao cliente pela Meta. Default seguro: desligado.
+  // Só a string exata "true" liga (evita ligar por engano com qualquer valor).
+  WHATSAPP_AUTO_REPLY_ENABLED: z.preprocess(
+    (value) => value === "true",
+    z.boolean()
+  ),
 });
 
 // Valores em branco no .env (ex.: copiado do .env.example) são tratados como
@@ -91,6 +99,9 @@ export type Env = typeof env;
 export const corsOrigins = env.CORS_ORIGINS.split(",")
   .map((origin) => origin.trim())
   .filter((origin) => origin.length > 0);
+
+/** Auto-resposta do worker ligada? (default desligado — só "true" liga.) */
+export const autoReplyEnabled = env.WHATSAPP_AUTO_REPLY_ENABLED;
 
 /**
  * Indica se há provedor OpenAI real configurado. Sem a chave, o stub só é usado

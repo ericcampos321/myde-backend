@@ -79,10 +79,11 @@ Preencha tudo no **`.env` local** (gitignored). **Nunca** versione tokens/segred
 
 Apenas para testes manuais **offline**, sem a Meta real. **Não** é o ambiente padrão.
 
-Suba o serviço explicitamente e aponte o `.env` para ele (somente nesse modo):
+O serviço está atrás do profile `mock` (não sobe no fluxo padrão). Suba-o
+explicitamente com o profile e aponte o `.env` para ele (somente nesse modo):
 
 ```bash
-docker compose up -d mock-meta
+docker compose --profile mock up -d mock-meta
 # no .env:  META_API_BASE_URL=http://localhost:8001
 ```
 

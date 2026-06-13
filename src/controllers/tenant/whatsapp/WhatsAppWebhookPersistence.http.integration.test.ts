@@ -29,6 +29,8 @@ const marker = `webhook-test-${Date.now()}`;
 const phoneNumberId = `${marker}-phone-number`;
 const unknownPhoneNumberId = `${marker}-unknown-phone-number`;
 const contactPhone = "5511977770000";
+// Telefone real exibido da empresa (≠ contactPhone) — vai no metadata.display_phone_number.
+const businessDisplayPhone = "5515991270311";
 const appSecret = env.META_APP_SECRET;
 
 const sql = postgres(env.DATABASE_URL, { max: 2 });
@@ -72,6 +74,7 @@ function payload(options: {
             value: {
               metadata: {
                 phone_number_id: options.targetPhoneNumberId ?? phoneNumberId,
+                display_phone_number: businessDisplayPhone,
               },
               contacts: [
                 {
@@ -185,6 +188,7 @@ describeDatabase("POST /webhook com persistencia", () => {
       externalMessageId: messageId,
       phoneNumberId,
       contactPhone,
+      displayPhoneNumber: businessDisplayPhone,
     });
   });
 
