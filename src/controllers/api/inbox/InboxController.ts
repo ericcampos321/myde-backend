@@ -9,10 +9,14 @@ interface SuggestReplyBody {
   conversationId: string;
 }
 
+interface ContactsQuerystring {
+  q?: string;
+}
+
 export interface InboxControllerOptions extends FastifyPluginOptions {
   inboxService?: Pick<
     InboxService,
-    "getMe" | "listConversations" | "listMessages" | "suggestReply"
+    "getMe" | "listConversations" | "listMessages" | "listContacts" | "suggestReply"
   >;
 }
 
@@ -29,6 +33,23 @@ export async function inboxController(
   app.get("/conversations", async () => {
     return inboxService.listConversations();
   });
+
+  app.get<{ Querystring: ContactsQuerystring }>(
+    "/contacts",
+    {
+      schema: {
+        querystring: {
+          type: "object",
+          properties: {
+            q: { type: "string" },
+          },
+        },
+      },
+    },
+    async (request) => {
+      return inboxService.listContacts(request.query.q);
+    }
+  );
 
   app.get<{ Params: ConversationParams }>(
     "/conversations/:conversationId/messages",

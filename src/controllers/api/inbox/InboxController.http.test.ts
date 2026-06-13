@@ -25,6 +25,16 @@ const inboxService = {
       lastMessageAt: "2026-06-12T12:00:00.000Z",
     },
   ]),
+  listContacts: vi.fn().mockResolvedValue([
+    {
+      id: "contact-1",
+      name: "Maria",
+      phone: "5511999999999",
+      profileName: "Maria",
+      createdAt: "2026-06-12T10:00:00.000Z",
+      updatedAt: "2026-06-12T12:00:00.000Z",
+    },
+  ]),
   listMessages: vi.fn().mockResolvedValue([
     {
       id: "msg-1",
@@ -82,6 +92,31 @@ describe("GET /conversations", () => {
         lastMessageAt: "2026-06-12T12:00:00.000Z",
       },
     ]);
+  });
+});
+
+describe("GET /contacts", () => {
+  it("retorna os contatos do tenant atual", async () => {
+    const res = await app.inject({ method: "GET", url: "/contacts" });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual([
+      {
+        id: "contact-1",
+        name: "Maria",
+        phone: "5511999999999",
+        profileName: "Maria",
+        createdAt: "2026-06-12T10:00:00.000Z",
+        updatedAt: "2026-06-12T12:00:00.000Z",
+      },
+    ]);
+  });
+
+  it("encaminha a busca opcional", async () => {
+    const res = await app.inject({ method: "GET", url: "/contacts?q=maria" });
+
+    expect(res.statusCode).toBe(200);
+    expect(inboxService.listContacts).toHaveBeenCalledWith("maria");
   });
 });
 

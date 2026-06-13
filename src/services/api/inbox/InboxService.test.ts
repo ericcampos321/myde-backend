@@ -41,3 +41,70 @@ describe("InboxService.listConversations (banco vazio)", () => {
     expect(findByConversationIds).not.toHaveBeenCalled();
   });
 });
+
+describe("InboxService.listContacts", () => {
+  const tenant = {
+    id: "tenant-1",
+    name: "NeoFibra",
+    phoneNumberId: "123456789012345",
+    wabaId: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
+
+  it("retorna contatos do tenant atual com busca opcional", async () => {
+    const findByPhoneNumberId = vi.fn().mockResolvedValue(tenant);
+    const listByTenant = vi.fn().mockResolvedValue([
+      {
+        id: "contact-1",
+        tenantId: tenant.id,
+        phone: "5511999999999",
+        name: "Maria",
+        createdAt: new Date("2026-06-12T10:00:00.000Z"),
+        updatedAt: new Date("2026-06-12T12:00:00.000Z"),
+      },
+    ]);
+
+    const service = new InboxService({
+      tenantRepository: { findByPhoneNumberId },
+      conversationRepository: { listByTenant: vi.fn(), findById: vi.fn() },
+      contactRepository: { findByIds: vi.fn(), listByTenant },
+      messageRepository: {
+        findByConversationId: vi.fn(),
+        findByConversationIds: vi.fn(),
+      },
+    });
+
+    const result = await service.listContacts("maria");
+
+    expect(listByTenant).toHaveBeenCalledWith(tenant.id, "maria");
+    expect(result).toEqual([
+      {
+        id: "contact-1",
+        name: "Maria",
+        phone: "5511999999999",
+        profileName: "Maria",
+        createdAt: "2026-06-12T10:00:00.000Z",
+        updatedAt: "2026-06-12T12:00:00.000Z",
+      },
+    ]);
+  });
+
+  it("retorna [] quando não há contatos", async () => {
+    const findByPhoneNumberId = vi.fn().mockResolvedValue(tenant);
+    const listByTenant = vi.fn().mockResolvedValue([]);
+
+    const service = new InboxService({
+      tenantRepository: { findByPhoneNumberId },
+      conversationRepository: { listByTenant: vi.fn(), findById: vi.fn() },
+      contactRepository: { findByIds: vi.fn(), listByTenant },
+      messageRepository: {
+        findByConversationId: vi.fn(),
+        findByConversationIds: vi.fn(),
+      },
+    });
+
+    await expect(service.listContacts()).resolves.toEqual([]);
+    expect(listByTenant).toHaveBeenCalledWith(tenant.id, undefined);
+  });
+});

@@ -1,4 +1,4 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, ilike, inArray, or } from "drizzle-orm";
 import { db, type Database } from "../../../db/client.js";
 import { whatsappContacts } from "../../../db/schema/index.js";
 import type { UpsertWhatsAppContactInput } from "../../../types/tenant/whatsapp/WhatsAppContactTypes.js";
@@ -45,6 +45,26 @@ export class WhatsAppContactRepository {
           inArray(whatsappContacts.id, ids)
         )
       );
+  }
+
+  async listByTenant(tenantId: string, searchTerm?: string | null) {
+    const normalizedSearch = searchTerm?.trim();
+
+    return this.database
+      .select()
+      .from(whatsappContacts)
+      .where(
+        and(
+          eq(whatsappContacts.tenantId, tenantId),
+          normalizedSearch
+            ? or(
+                ilike(whatsappContacts.name, `%${normalizedSearch}%`),
+                ilike(whatsappContacts.phone, `%${normalizedSearch}%`)
+              )
+            : undefined
+        )
+      )
+      .orderBy(desc(whatsappContacts.updatedAt), desc(whatsappContacts.createdAt));
   }
 
   async upsertByPhone(data: UpsertWhatsAppContactInput) {

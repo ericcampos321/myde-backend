@@ -56,13 +56,22 @@ export interface InboxSuggestionDto {
   source: "openai" | "stub";
 }
 
+export interface InboxContactDto {
+  id: string;
+  name: string;
+  phone: string;
+  profileName: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface InboxServiceDependencies {
   tenantRepository?: Pick<WhatsAppTenantRepository, "findByPhoneNumberId">;
   conversationRepository?: Pick<
     WhatsAppConversationRepository,
     "findById" | "listByTenant"
   >;
-  contactRepository?: Pick<WhatsAppContactRepository, "findByIds">;
+  contactRepository?: Pick<WhatsAppContactRepository, "findByIds" | "listByTenant">;
   messageRepository?: Pick<
     WhatsAppMessageRepository,
     "findByConversationId" | "findByConversationIds"
@@ -156,6 +165,20 @@ export class InboxService {
       body: message.body,
       status: normalizeMessageStatus(message.status),
       createdAt: message.createdAt.toISOString(),
+    }));
+  }
+
+  async listContacts(searchTerm?: string): Promise<InboxContactDto[]> {
+    const tenant = await this.resolveCurrentTenant();
+    const contacts = await this.contactRepository.listByTenant(tenant.id, searchTerm);
+
+    return contacts.map((contact) => ({
+      id: contact.id,
+      name: contact.name?.trim() || "Contato sem nome",
+      phone: contact.phone,
+      profileName: contact.name?.trim() || null,
+      createdAt: contact.createdAt.toISOString(),
+      updatedAt: contact.updatedAt.toISOString(),
     }));
   }
 
