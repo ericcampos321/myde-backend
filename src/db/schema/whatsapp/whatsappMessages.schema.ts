@@ -4,6 +4,7 @@ import {
   check,
   foreignKey,
   index,
+  integer,
   pgTable,
   text,
   timestamp,
@@ -25,6 +26,11 @@ export const whatsappMessages = pgTable(
     body: text("body").notNull(),
     status: text("status").notNull(),
     externalMessageId: text("external_message_id"),
+    // Motivo da falha de entrega reportado pela Meta (statuses[] failed).
+    // Nullable: só preenchido quando status = "failed".
+    failureCode: integer("failure_code"),
+    failureReason: text("failure_reason"),
+    failedAt: timestamp("failed_at", { withTimezone: true }),
     replyToMessageId: uuid("reply_to_message_id").references(
       (): AnyPgColumn => whatsappMessages.id
     ),

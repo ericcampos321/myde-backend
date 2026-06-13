@@ -93,16 +93,26 @@ export class WhatsAppMessageRepository {
 
   /**
    * Atualiza o status de uma mensagem outbound pelo externalMessageId (wamid),
-   * tenant-scoped. Retorna a row atualizada ou null se não encontrada.
+   * tenant-scoped. Quando status="failed", grava também o motivo da Meta
+   * (failureCode/failureReason/failedAt). Retorna a row atualizada ou null.
    */
   async updateStatusByExternalMessageId(
     tenantId: string,
     externalMessageId: string,
-    status: string
+    status: string,
+    failure?: { code: number | null; reason: string | null }
   ) {
+    const isFailed = status === "failed";
     const [message] = await this.database
       .update(whatsappMessages)
-      .set({ status, updatedAt: new Date() })
+      .set({
+        status,
+        updatedAt: new Date(),
+        // Só popula campos de falha quando failed; senão limpa (ex.: re-tentativa).
+        failureCode: isFailed ? (failure?.code ?? null) : null,
+        failureReason: isFailed ? (failure?.reason ?? null) : null,
+        failedAt: isFailed ? new Date() : null,
+      })
       .where(
         and(
           eq(whatsappMessages.tenantId, tenantId),

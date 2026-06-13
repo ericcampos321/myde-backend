@@ -84,12 +84,14 @@ export class WhatsAppMessageService {
   async updateStatusByExternalMessageId(
     tenantId: string,
     externalMessageId: string,
-    status: string
+    status: string,
+    failure?: { code: number | null; reason: string | null }
   ): Promise<WhatsAppMessageRow | null> {
     return this.messageRepository.updateStatusByExternalMessageId(
       tenantId,
       externalMessageId,
-      status
+      status,
+      failure
     );
   }
 }

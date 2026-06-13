@@ -15,6 +15,13 @@
       "when": 1781280243089,
       "tag": "0001_new_stepford_cuckoos",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1781375005369,
+      "tag": "0002_curious_starjammers",
+      "breakpoints": true
     }
   ]
 }

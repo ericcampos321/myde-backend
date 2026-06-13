@@ -30,7 +30,9 @@ interface MetaGraphApiErrorResponse {
   error?: {
     code: number;
     message: string;
+    type?: string;
     error_subcode?: number;
+    fbtrace_id?: string;
   };
   errors?: Array<{
     code: number;
@@ -105,14 +107,18 @@ export class MetaGraphApiClient {
   async sendText(params: SendTextParams): Promise<SendTextResult> {
     const url = `${this.apiBaseUrl}/${params.phoneNumberId}/messages`;
 
+    // Contrato IDÊNTICO ao do envio direto que funciona (Graph API v25):
+    // inclui recipient_type=individual e text.preview_url=false explícitos.
     const payload = {
       messaging_product: "whatsapp",
+      recipient_type: "individual",
       to: params.to,
       type: "text",
       text: {
+        preview_url: false,
         body: params.body,
       },
-    };
+    } as const;
 
     const baseUrlHost = hostOf(this.apiBaseUrl);
     const metaMode = metaModeOf(this.apiBaseUrl);
@@ -124,6 +130,14 @@ export class MetaGraphApiClient {
         phoneNumberId: params.phoneNumberId,
         to: maskPhone(params.to),
         bodyLength: params.body.length,
+        payloadKeys: {
+          messaging_product: payload.messaging_product,
+          recipient_type: payload.recipient_type,
+          to: maskPhone(payload.to),
+          type: payload.type,
+          "text.preview_url": payload.text.preview_url,
+          "text.bodyExists": payload.text.body.length > 0,
+        },
       },
       "[meta] sending text message"
     );
@@ -148,6 +162,7 @@ export class MetaGraphApiClient {
           (data as MetaGraphApiErrorResponse).errors?.[0]?.message ||
           `HTTP ${response.status}`;
 
+        const metaError = (data as MetaGraphApiErrorResponse).error;
         log.error(
           {
             metaMode,
@@ -155,7 +170,10 @@ export class MetaGraphApiClient {
             phoneNumberId: params.phoneNumberId,
             to: maskPhone(params.to),
             status: response.status,
-            errorCode: (data as MetaGraphApiErrorResponse).error?.code,
+            errorCode: metaError?.code,
+            errorType: metaError?.type,
+            errorSubcode: metaError?.error_subcode,
+            fbtraceId: metaError?.fbtrace_id,
             errorMessage: errorMsg,
           },
           "[meta] send message failed"

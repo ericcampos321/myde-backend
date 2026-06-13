@@ -29,8 +29,15 @@ export interface NormalizedMessageStatus {
   /** wamid da mensagem outbound (= externalMessageId persistido). */
   messageId: string;
   status: string;
+  /** Telefone do destinatário (statuses[].recipient_id). */
+  recipientId: string | null;
+  /** Epoch (segundos) do evento de status. */
+  timestamp: string | null;
   errorCode: number | null;
   errorTitle: string | null;
+  errorMessage: string | null;
+  /** errors[].error_data.details — o motivo mais detalhado, quando a Meta envia. */
+  errorDetails: string | null;
 }
 
 export type MetaWebhookMappingResult =

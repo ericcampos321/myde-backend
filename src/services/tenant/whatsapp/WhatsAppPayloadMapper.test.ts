@@ -130,14 +130,18 @@ describe("WhatsAppPayloadMapper", () => {
         {
           messageId: "wamid.outbound-1",
           status: "delivered",
+          recipientId: "5511999990000",
+          timestamp: "1760000000",
           errorCode: null,
           errorTitle: null,
+          errorMessage: null,
+          errorDetails: null,
         },
       ],
     });
   });
 
-  it("mapeia status failed com error code/title", () => {
+  it("mapeia status failed com code/title/message/details e recipient_id", () => {
     const result = mapper.map({
       object: "whatsapp_business_account",
       entry: [
@@ -152,8 +156,18 @@ describe("WhatsAppPayloadMapper", () => {
                   {
                     id: "wamid.outbound-2",
                     status: "failed",
+                    recipient_id: "5514991270311",
+                    timestamp: "1760000123",
                     errors: [
-                      { code: 131026, title: "Message undeliverable" },
+                      {
+                        code: 131026,
+                        title: "Message undeliverable",
+                        message: "Message Undeliverable.",
+                        error_data: {
+                          details:
+                            "Message could not be delivered. The recipient may not have WhatsApp or has not accepted the new terms.",
+                        },
+                      },
                     ],
                   },
                 ],
@@ -164,14 +178,20 @@ describe("WhatsAppPayloadMapper", () => {
       ],
     });
 
-    expect(result).toMatchObject({
+    expect(result).toEqual({
       kind: "status",
+      phoneNumberId: "123456789012345",
       statuses: [
         {
           messageId: "wamid.outbound-2",
           status: "failed",
+          recipientId: "5514991270311",
+          timestamp: "1760000123",
           errorCode: 131026,
           errorTitle: "Message undeliverable",
+          errorMessage: "Message Undeliverable.",
+          errorDetails:
+            "Message could not be delivered. The recipient may not have WhatsApp or has not accepted the new terms.",
         },
       ],
     });

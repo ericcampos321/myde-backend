@@ -180,17 +180,22 @@ describeDatabase("WhatsAppOutboundService (integração persistência)", () => {
     const wrong = await repo.updateStatusByExternalMessageId(
       otherTenantId,
       wamid,
-      "failed"
+      "failed",
+      { code: 131026, reason: "Message undeliverable" }
     );
     expect(wrong).toBeNull();
 
-    // Tenant certo atualiza para "failed".
+    // Tenant certo atualiza para "failed" + grava o motivo da Meta.
     const updated = await repo.updateStatusByExternalMessageId(
       tenantId,
       wamid,
-      "failed"
+      "failed",
+      { code: 131026, reason: "Message undeliverable" }
     );
     expect(updated?.status).toBe("failed");
+    expect(updated?.failureCode).toBe(131026);
+    expect(updated?.failureReason).toBe("Message undeliverable");
+    expect(updated?.failedAt).not.toBeNull();
 
     const [row] = await database
       .select()
@@ -202,6 +207,8 @@ describeDatabase("WhatsAppOutboundService (integração persistência)", () => {
         )
       );
     expect(row?.status).toBe("failed");
+    expect(row?.failureCode).toBe(131026);
+    expect(row?.failureReason).toBe("Message undeliverable");
   });
 
   it("falha da Meta NÃO persiste outbound (Meta primeiro)", async () => {

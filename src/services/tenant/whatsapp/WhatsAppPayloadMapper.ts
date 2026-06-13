@@ -27,7 +27,14 @@ interface MetaWebhookPayload {
         statuses?: Array<{
           id?: unknown;
           status?: unknown;
-          errors?: Array<{ code?: unknown; title?: unknown; message?: unknown }>;
+          recipient_id?: unknown;
+          timestamp?: unknown;
+          errors?: Array<{
+            code?: unknown;
+            title?: unknown;
+            message?: unknown;
+            error_data?: { details?: unknown };
+          }>;
         }>;
       };
     }>;
@@ -78,10 +85,16 @@ export class WhatsAppPayloadMapper {
             const firstError = s?.errors?.[0];
             const errorCode =
               typeof firstError?.code === "number" ? firstError.code : null;
-            const errorTitle =
-              nonEmptyString(firstError?.title) ??
-              nonEmptyString(firstError?.message);
-            return { messageId, status, errorCode, errorTitle };
+            return {
+              messageId,
+              status,
+              recipientId: nonEmptyString(s?.recipient_id),
+              timestamp: nonEmptyString(s?.timestamp),
+              errorCode,
+              errorTitle: nonEmptyString(firstError?.title),
+              errorMessage: nonEmptyString(firstError?.message),
+              errorDetails: nonEmptyString(firstError?.error_data?.details),
+            };
           })
           .filter((s): s is NonNullable<typeof s> => s !== null);
 

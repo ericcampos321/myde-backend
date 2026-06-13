@@ -241,10 +241,18 @@ export class WhatsAppWebhookService {
         {
           externalMessageId: s.messageId,
           status: s.status,
+          // Destinatário mascarado (LGPD): permite conferir o final do número.
+          recipientId: maskPhone(s.recipientId),
+          timestamp: s.timestamp,
+          // Motivo EXATO da Meta quando status=failed:
           errorCode: s.errorCode,
           errorTitle: s.errorTitle,
+          errorMessage: s.errorMessage,
+          errorDetails: s.errorDetails,
         },
-        "webhook status event"
+        s.status === "failed"
+          ? "webhook status event: MENSAGEM NÃO ENTREGUE (failed)"
+          : "webhook status event"
       );
     }
 
@@ -257,11 +265,21 @@ export class WhatsAppWebhookService {
 
     for (const s of statuses) {
       try {
+        const failure =
+          s.status === "failed"
+            ? {
+                code: s.errorCode,
+                // Motivo legível: details > message > title.
+                reason:
+                  s.errorDetails ?? s.errorMessage ?? s.errorTitle ?? null,
+              }
+            : undefined;
         const updated =
           await this.messageService.updateStatusByExternalMessageId(
             resolution.tenant.id,
             s.messageId,
-            s.status
+            s.status,
+            failure
           );
         if (!updated) {
           this.log.debug(
