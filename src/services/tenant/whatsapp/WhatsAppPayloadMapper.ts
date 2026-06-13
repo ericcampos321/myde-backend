@@ -23,6 +23,8 @@ interface MetaWebhookPayload {
           type?: unknown;
           text?: { body?: unknown };
         }>;
+        // Eventos de status de entrega de outbound (sent/delivered/read/failed).
+        statuses?: Array<unknown>;
       };
     }>;
   }>;
@@ -50,15 +52,22 @@ export class WhatsAppPayloadMapper {
     const text = nonEmptyString(message?.text?.body);
     const timestampSeconds = nonEmptyString(message?.timestamp);
 
-    if (
-      message?.type !== "text" ||
-      !phoneNumberId ||
-      !wabaId ||
-      !externalMessageId ||
-      !contactPhone ||
-      !text ||
-      !timestampSeconds
-    ) {
+    const isProcessableText =
+      message?.type === "text" &&
+      phoneNumberId &&
+      wabaId &&
+      externalMessageId &&
+      contactPhone &&
+      text &&
+      timestampSeconds;
+
+    if (!isProcessableText) {
+      // Evento de status de entrega de outbound: ignorar com motivo próprio
+      // (não é "unsupported"; é esperado e não-processável). Nunca vira erro.
+      const statuses = value?.statuses;
+      if (Array.isArray(statuses) && statuses.length > 0) {
+        return { kind: "ignored", reason: "status_event" };
+      }
       return { kind: "ignored", reason: "unsupported_event" };
     }
 

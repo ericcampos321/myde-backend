@@ -51,11 +51,13 @@ const envSchema = z.object({
   META_APP_SECRET: z.string().min(1).optional(),
   META_TOKEN: z.string().min(1).optional(),
   META_PHONE_NUMBER_ID: z.string().min(1).optional(),
-  // Base da Graph API real por padrão; o mock é injetado só em test.
+  // Base do envio outbound: {META_API_BASE_URL}/{phoneNumberId}/messages.
+  // Real → https://graph.facebook.com/v25.0 ; mock → http://mock-meta:8001.
+  // Default real por conveniência; o mock de test é injetado só em NODE_ENV=test.
   META_API_BASE_URL: z
     .string()
     .url()
-    .default("https://graph.facebook.com/v20.0"),
+    .default("https://graph.facebook.com/v25.0"),
 
   OPENAI_API_KEY: z.string().optional(),
   OPENAI_MODEL: z.string().min(1).default("gpt-5.4"),

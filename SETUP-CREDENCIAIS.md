@@ -43,7 +43,7 @@ Cloud API**. Para desenvolvimento, use o **ambiente de teste real da Meta**
    - **Add Assets** → seu app WhatsApp, com permissão total.
    - **Generate new token** → selecione `whatsapp_business_messaging` e
      `whatsapp_business_management`. Esse token é de longa duração → use em `META_TOKEN`.
-6. `META_API_BASE_URL` = `https://graph.facebook.com/v20.0` (Graph API real).
+6. `META_API_BASE_URL` = `https://graph.facebook.com/v25.0` (Graph API real).
 
 ### Configurar o webhook real (com túnel para o backend local)
 
@@ -69,7 +69,7 @@ Cloud API**. Para desenvolvimento, use o **ambiente de teste real da Meta**
 | `META_APP_SECRET` | App Settings → Basic (App Secret real) | Sim (assinatura) |
 | `META_TOKEN` | System User token (real, longa duração) | Sim (envio/Graph API) |
 | `META_PHONE_NUMBER_ID` | Número de teste provisionado pela Meta | Sim |
-| `META_API_BASE_URL` | `https://graph.facebook.com/v20.0` | Sim |
+| `META_API_BASE_URL` | `https://graph.facebook.com/v25.0` | Sim |
 
 Preencha tudo no **`.env` local** (gitignored). **Nunca** versione tokens/segredos reais.
 

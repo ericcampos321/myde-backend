@@ -26,7 +26,7 @@ export interface NormalizedInboundMessage {
 
 export type MetaWebhookMappingResult =
   | { kind: "message"; message: NormalizedInboundMessage }
-  | { kind: "ignored"; reason: "unsupported_event" };
+  | { kind: "ignored"; reason: "unsupported_event" | "status_event" };
 
 export type MetaWebhookAckResponse =
   | {
@@ -42,5 +42,5 @@ export type MetaWebhookAckResponse =
   | {
       received: true;
       ignored: true;
-      reason: "unsupported_event" | "unknown_tenant";
+      reason: "unsupported_event" | "unknown_tenant" | "status";
     };

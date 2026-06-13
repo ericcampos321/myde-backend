@@ -93,4 +93,36 @@ describe("WhatsAppPayloadMapper", () => {
       reason: "unsupported_event",
     });
   });
+
+  it("ignora evento de statuses[] com reason status_event (não unsupported)", () => {
+    const result = mapper.map({
+      object: "whatsapp_business_account",
+      entry: [
+        {
+          id: "WABA_TESTE_0001",
+          changes: [
+            {
+              field: "messages",
+              value: {
+                metadata: {
+                  phone_number_id: "123456789012345",
+                  display_phone_number: "5515991270311",
+                },
+                statuses: [
+                  {
+                    id: "wamid.outbound-1",
+                    status: "delivered",
+                    timestamp: "1760000000",
+                    recipient_id: "5511999990000",
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(result).toEqual({ kind: "ignored", reason: "status_event" });
+  });
 });

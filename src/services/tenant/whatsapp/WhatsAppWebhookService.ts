@@ -114,6 +114,12 @@ export class WhatsAppWebhookService {
 
     const mapped = this.payloadMapper.map(params.payload);
     if (mapped.kind === "ignored") {
+      if (mapped.reason === "status_event") {
+        // Status de entrega de outbound (sent/delivered/read). Esperado: ignora
+        // explicitamente, sem worker e sem erro. Mantém 200 para a Meta.
+        this.log.info({ reason: mapped.reason }, "webhook status event ignored");
+        return WebhookDeliveryPolicy.ignoredStatusEvent();
+      }
       this.log.warn({ reason: mapped.reason }, "webhook event ignored");
       return WebhookDeliveryPolicy.ignoredUnsupportedEvent();
     }

@@ -18,6 +18,14 @@ describe("WebhookDeliveryPolicy", () => {
     });
   });
 
+  it("decide ignored com reason status para statuses[]", () => {
+    expect(WebhookDeliveryPolicy.ignoredStatusEvent()).toEqual({
+      received: true,
+      ignored: true,
+      reason: "status",
+    });
+  });
+
   it("decide duplicated sem repersistir", () => {
     expect(WebhookDeliveryPolicy.duplicated()).toEqual({
       received: true,

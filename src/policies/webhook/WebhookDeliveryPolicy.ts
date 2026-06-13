@@ -7,6 +7,7 @@ import type { MetaWebhookAckResponse } from "../../types/tenant/whatsapp/WhatsAp
 export const WEBHOOK_IGNORED_REASONS = {
   UNKNOWN_TENANT: "unknown_tenant",
   UNSUPPORTED_EVENT: "unsupported_event",
+  STATUS: "status",
 } as const;
 
 export type WebhookIgnoredReason =
@@ -35,6 +36,15 @@ export class WebhookDeliveryPolicy {
       received: true,
       ignored: true,
       reason: WEBHOOK_IGNORED_REASONS.UNSUPPORTED_EVENT,
+    };
+  }
+
+  /** Evento de status de entrega de outbound (statuses[]): confirma e ignora. */
+  static ignoredStatusEvent(): MetaWebhookAckResponse {
+    return {
+      received: true,
+      ignored: true,
+      reason: WEBHOOK_IGNORED_REASONS.STATUS,
     };
   }
 

@@ -284,6 +284,39 @@ docker compose --profile mock up -d mock-meta
 # no .env (apenas para esse modo legado):  META_API_BASE_URL=http://localhost:8001
 ```
 
+### Modo mock vs modo real (envio outbound)
+
+O envio é feito para **`{META_API_BASE_URL}/{phoneNumberId}/messages`** — a base é
+100% configurável, sem `graph.facebook.com` hardcoded. Basta trocar `META_API_BASE_URL`:
+
+| Modo | `META_API_BASE_URL` | `META_TOKEN` |
+|---|---|---|
+| **Mock (teste técnico)** | `http://mock-meta:8001` (backend no Docker) ou `http://localhost:8001` (backend no host) | placeholder (o mock não valida `Authorization`) |
+| **Real (Meta Cloud API)** | `https://graph.facebook.com/v25.0` | System User token real |
+
+O cliente envia o header `Authorization: Bearer <META_TOKEN>` nos dois modos; o
+mock simplesmente ignora. Suba o mock com `docker compose --profile mock up -d mock-meta`.
+
+### Testar via curl
+
+```bash
+# 1) Handshake GET (substitua <TOKEN> pelo META_VERIFY_TOKEN)
+curl -i "http://localhost:8000/webhook?hub.mode=subscribe&hub.verify_token=<TOKEN>&hub.challenge=ping"
+# → 200, corpo: ping
+
+# 2) POST /webhook ASSINADO (inbound simulado) — HMAC do raw body com META_APP_SECRET
+SECRET=$(grep -E '^META_APP_SECRET=' .env | cut -d'=' -f2-)
+PNID=$(grep -E '^META_PHONE_NUMBER_ID=' .env | cut -d'=' -f2-)
+BODY='{"object":"whatsapp_business_account","entry":[{"id":"WABA","changes":[{"field":"messages","value":{"metadata":{"phone_number_id":"'"$PNID"'","display_phone_number":"5599999999999"},"contacts":[{"wa_id":"5514991270311","profile":{"name":"Teste"}}],"messages":[{"from":"5514991270311","id":"wamid.local-'"$(date +%s)"'","timestamp":"'"$(date +%s)"'","type":"text","text":{"body":"oi"}}]}}]}]}'
+SIG="sha256=$(printf '%s' "$BODY" | openssl dgst -sha256 -hmac "$SECRET" | sed 's/^.* //')"
+curl -i -X POST http://localhost:8000/webhook -H "Content-Type: application/json" -H "x-hub-signature-256: $SIG" -d "$BODY"
+# → 200 {"received":true,"persisted":true,"duplicated":false}
+
+# 3) Consultar conversas e mensagens (tenant-scoped)
+curl -s http://localhost:8000/conversations
+curl -s http://localhost:8000/conversations/<conversationId>/messages
+```
+
 ### Validação
 
 ```bash
@@ -328,6 +361,12 @@ O provider é selecionado por factory (`selectAiProviderKind` / `createAiProvide
   para os testes (não faz chamadas externas).
 - Sem `OPENAI_API_KEY` em desenvolvimento/produção: **falha com erro de
   configuração explícito** — a ausência da chave real não é mascarada por mock.
+
+O `OpenAiProvider` escolhe o parâmetro de limite de saída pelo modelo: modelos
+novos/razonadores (`gpt-5*`, o-series) usam `max_completion_tokens` (e omitem
+`temperature`); legados (`gpt-4o`, `gpt-4`, `gpt-3.5`) usam `max_tokens` +
+`temperature`. Erros da OpenAI viram `AppError` (`AI_PROVIDER_ERROR`, 502) com
+log seguro (status/code/param/request_id — sem prompt nem chave).
 
 A base de conhecimento fica em `knowledge-base/` e hoje é pequena o suficiente
 para ser carregada inteira em memória e enviada como contexto bruto para o

@@ -1,7 +1,24 @@
 import OpenAI from "openai";
 import { env } from "../../../../config/env.js";
+import { AppError } from "../../../../errors/AppError.js";
+import { createLogger } from "../../../../shared/logger/logger.js";
 import type { AiProviderInput, AiProviderResult } from "../../../../types/tenant/ai/AiTypes.js";
 import type { AiProvider } from "./AiProvider.js";
+
+const log = createLogger({ module: "openai-provider" });
+
+const MAX_OUTPUT_TOKENS = 350;
+
+/**
+ * Modelos novos (gpt-5*) e de raciocínio (o-series: o1/o3/o4...) NÃO aceitam
+ * `max_tokens` — exigem `max_completion_tokens` — e normalmente só permitem a
+ * `temperature` padrão. Modelos legados (gpt-4o, gpt-4, gpt-3.5...) seguem com
+ * `max_tokens` + `temperature` custom.
+ */
+export function usesMaxCompletionTokens(model: string): boolean {
+  const m = model.trim().toLowerCase();
+  return m.startsWith("gpt-5") || /^o\d/.test(m);
+}
 
 export interface OpenAiProviderOptions {
   client?: OpenAI;
@@ -14,27 +31,33 @@ export class OpenAiProvider implements AiProvider {
   private readonly model: string;
 
   constructor(options: OpenAiProviderOptions = {}) {
-    if (!env.OPENAI_API_KEY) {
-      throw new Error(
-        "OPENAI_API_KEY is required to instantiate OpenAiProvider."
-      );
+    if (options.client) {
+      // Cliente injetado (testes): não exige a chave real.
+      this.client = options.client;
+    } else {
+      if (!env.OPENAI_API_KEY) {
+        throw new Error(
+          "OPENAI_API_KEY is required to instantiate OpenAiProvider."
+        );
+      }
+      this.client = new OpenAI({ apiKey: env.OPENAI_API_KEY });
     }
-
-    this.client =
-      options.client ??
-      new OpenAI({
-        apiKey: env.OPENAI_API_KEY,
-      });
     this.model = options.model ?? env.OPENAI_MODEL;
   }
 
-  async generateReply(
-    input: AiProviderInput
-  ): Promise<AiProviderResult> {
-    const completion = await this.client.chat.completions.create({
+  /** Monta os parâmetros de limite de saída/temperatura conforme o modelo. */
+  buildTokenParams(): Partial<OpenAI.Chat.ChatCompletionCreateParamsNonStreaming> {
+    if (usesMaxCompletionTokens(this.model)) {
+      // Sem `temperature`: modelos novos/razonadores só aceitam o default.
+      return { max_completion_tokens: MAX_OUTPUT_TOKENS };
+    }
+    return { max_tokens: MAX_OUTPUT_TOKENS, temperature: 0.2 };
+  }
+
+  async generateReply(input: AiProviderInput): Promise<AiProviderResult> {
+    const params: OpenAI.Chat.ChatCompletionCreateParamsNonStreaming = {
       model: this.model,
-      temperature: 0.2,
-      max_tokens: 350,
+      ...this.buildTokenParams(),
       messages: [
         {
           role: "system",
@@ -49,17 +72,60 @@ export class OpenAiProvider implements AiProvider {
           content: input.userMessage,
         },
       ],
-    });
+    };
+
+    let completion: OpenAI.Chat.ChatCompletion;
+    try {
+      completion = await this.client.chat.completions.create(params);
+    } catch (error) {
+      this.throwSafeProviderError(error);
+    }
 
     const text = completion.choices[0]?.message?.content?.trim();
     if (!text) {
-      throw new Error("OpenAI returned an empty response.");
+      log.error({ model: this.model }, "[openai] resposta vazia");
+      throw new AppError({
+        code: "AI_PROVIDER_EMPTY_RESPONSE",
+        message: "A IA não retornou conteúdo. Tente novamente.",
+        statusCode: 502,
+      });
     }
 
-    return {
-      source: this.source,
-      text,
-    };
+    return { source: this.source, text };
+  }
+
+  /**
+   * Converte erro do SDK em AppError amigável. Loga apenas metadados seguros
+   * (status, code, param, type, request_id) — NUNCA prompt, mensagens ou token.
+   */
+  private throwSafeProviderError(error: unknown): never {
+    if (error instanceof OpenAI.APIError) {
+      log.error(
+        {
+          model: this.model,
+          status: error.status,
+          code: error.code,
+          param: error.param,
+          type: error.type,
+          requestId: error.request_id,
+        },
+        "[openai] erro da API"
+      );
+    } else {
+      log.error(
+        {
+          model: this.model,
+          error: error instanceof Error ? error.message : "unknown",
+        },
+        "[openai] erro inesperado"
+      );
+    }
+
+    throw new AppError({
+      code: "AI_PROVIDER_ERROR",
+      message: "Falha ao gerar resposta de IA. Tente novamente em instantes.",
+      statusCode: 502,
+    });
   }
 }
 
