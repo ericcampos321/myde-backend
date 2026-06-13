@@ -105,6 +105,34 @@ export class MessageProcessingProcessor {
         payload.tenantId,
         payload.conversationId
       );
+
+    // Human takeover: se o auto-reply está ligado e o operador já respondeu
+    // MANUALMENTE esta conversa depois do inbound, não geramos IA nem enviamos.
+    // Checa antes da IA para economizar a chamada à OpenAI. (Quando o auto-reply
+    // está desligado, seguimos gerando a sugestão para o operador no composer.)
+    if (
+      this.dependencies.autoReplyEnabled &&
+      this.dependencies.outboundService &&
+      message.direction === "inbound" &&
+      hasManualReplyAfter(conversationMessages, message)
+    ) {
+      this.dependencies.log.info(
+        {
+          tenantId: payload.tenantId,
+          conversationId: payload.conversationId,
+          messageId: payload.messageId,
+        },
+        "[auto-reply] conversa já respondida manualmente — ignorando"
+      );
+      return {
+        processed: false,
+        skipped: true,
+        reason: "manually_answered",
+        messageId: message.id,
+        conversationId: conversation.id,
+      };
+    }
+
     const aiResponse = await this.dependencies.aiResponseService.generateResponse(
       {
         currentMessage: message.body,
@@ -128,7 +156,21 @@ export class MessageProcessingProcessor {
       "message processing job handled"
     );
 
-    await this.maybeAutoReply(payload, message.direction, aiResponse.text);
+    const manuallyAnswered = await this.maybeAutoReply(
+      payload,
+      message,
+      aiResponse.text
+    );
+    if (manuallyAnswered) {
+      // Segunda checagem (pós-IA) pegou uma resposta manual: não enviamos.
+      return {
+        processed: false,
+        skipped: true,
+        reason: "manually_answered",
+        messageId: message.id,
+        conversationId: conversation.id,
+      };
+    }
 
     return {
       processed: true,
@@ -143,22 +185,29 @@ export class MessageProcessingProcessor {
    * Envia a resposta de IA ao cliente quando o auto-reply está ligado. Guardas:
    * - flag desligada → não faz nada (comportamento padrão);
    * - só responde mensagens INBOUND (nunca responde outbound/própria);
+   * - anti-loop: não responde ao próprio número da empresa;
    * - texto de IA vazio/branco → não envia;
+   * - **human takeover (double-check)**: além da checagem antes da IA, refaz uma
+   *   busca FRESH das mensagens imediatamente antes do envio. Assim, se o operador
+   *   responder manualmente DURANTE a geração da IA, o bot ainda não envia;
    * - idempotência (replyToMessageId) garante 1 resposta por inbound, mesmo em retry;
    * - falha da Meta é logada de forma segura e re-lançada para o job falhar/retry.
+   *
+   * Retorna `true` quando a 2ª checagem detectou resposta manual (job deve concluir
+   * como `skipped: manually_answered`); `false` nos demais casos.
    */
   private async maybeAutoReply(
     payload: MessageProcessingJobPayload,
-    direction: string,
+    inbound: TakeoverMessage,
     aiText: string
-  ): Promise<void> {
+  ): Promise<boolean> {
     if (!this.dependencies.autoReplyEnabled || !this.dependencies.outboundService) {
-      return;
+      return false;
     }
 
-    if (direction !== "inbound") {
+    if (inbound.direction !== "inbound") {
       // Defensivo: a fila só recebe inbound, mas nunca responder a uma outbound.
-      return;
+      return false;
     }
 
     // Anti-loop: não responder se o remetente é o próprio número da empresa.
@@ -175,7 +224,7 @@ export class MessageProcessingProcessor {
         },
         "[auto-reply] remetente é o próprio número da empresa — ignorando"
       );
-      return;
+      return false;
     }
 
     const text = aiText?.trim() ?? "";
@@ -188,7 +237,27 @@ export class MessageProcessingProcessor {
         },
         "[auto-reply] sugestão de IA vazia — não enviando"
       );
-      return;
+      return false;
+    }
+
+    // Human takeover (2ª checagem): busca FRESH as mensagens imediatamente antes
+    // do envio. Fecha a janela de corrida em que o operador responde manualmente
+    // DURANTE a geração da IA (a 1ª checagem, pré-IA, não enxergaria essa resposta).
+    const freshMessages =
+      await this.dependencies.messageRepository.findByConversationId(
+        payload.tenantId,
+        payload.conversationId
+      );
+    if (hasManualReplyAfter(freshMessages, inbound)) {
+      this.dependencies.log.info(
+        {
+          tenantId: payload.tenantId,
+          conversationId: payload.conversationId,
+          messageId: payload.messageId,
+        },
+        "[auto-reply] conversa respondida manualmente durante geração IA — ignorando"
+      );
+      return true;
     }
 
     try {
@@ -221,7 +290,42 @@ export class MessageProcessingProcessor {
       );
       throw error;
     }
+
+    return false;
   }
+}
+
+/** Mensagem mínima necessária para a checagem de human takeover. */
+interface TakeoverMessage {
+  id: string;
+  direction: string;
+  replyToMessageId: string | null;
+  createdAt: Date;
+}
+
+/**
+ * Indica se já existe uma resposta MANUAL do operador na conversa, criada em ou
+ * depois do inbound. Manual = outbound SEM `replyToMessageId` (os auto-replies
+ * sempre têm `replyToMessageId`, então não contam — preserva a idempotência).
+ * As mensagens já vêm filtradas por tenant+conversa pelo repositório. Defensivo:
+ * sem `createdAt` confiável, não bloqueia (evita falso-positivo).
+ */
+function hasManualReplyAfter(
+  messages: ReadonlyArray<TakeoverMessage>,
+  inbound: TakeoverMessage
+): boolean {
+  if (!(inbound.createdAt instanceof Date)) {
+    return false;
+  }
+  const inboundTime = inbound.createdAt.getTime();
+
+  return messages.some((m) => {
+    if (m.direction !== "outbound") return false;
+    if (m.replyToMessageId != null) return false; // auto-reply, não manual
+    if (m.id === inbound.id) return false;
+    if (!(m.createdAt instanceof Date)) return false;
+    return m.createdAt.getTime() >= inboundTime;
+  });
 }
 
 export function createMessageProcessingProcessor(

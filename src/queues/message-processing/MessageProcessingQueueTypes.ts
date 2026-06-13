@@ -24,7 +24,11 @@ export interface MessageProcessingResult {
   aiResponseText?: string;
   aiSource?: "openai" | "stub";
   skipped?: boolean;
-  reason?: "message_not_found" | "conversation_not_found" | "invalid_payload";
+  reason?:
+    | "message_not_found"
+    | "conversation_not_found"
+    | "invalid_payload"
+    | "manually_answered";
 }
 
 export interface EnqueueInboundMessageResult {

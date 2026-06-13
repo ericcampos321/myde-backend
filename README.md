@@ -251,6 +251,13 @@ Com a flag ligada, ao processar um inbound o worker chama o **mesmo**
 - **Só responde inbound** (nunca a própria outbound) e **não envia** se a IA
   devolver texto vazio.
 - **Falha da Meta** é logada de forma segura (sem token) e o job falha/retry.
+- **Human takeover (double-check):** se o operador já respondeu **manualmente** a
+  conversa (outbound com `replyToMessageId IS NULL` criada em/depois do inbound),
+  o worker **não** envia auto-reply. A checagem roda **duas vezes**: antes da IA
+  (economiza a chamada à OpenAI quando o operador respondeu antes) e **de novo,
+  com busca fresh, imediatamente antes do envio** — fechando a janela de corrida
+  em que o operador responde *durante* a geração da IA. Nesses casos o job conclui
+  como `skipped: manually_answered`, sem erro.
 - **Desligada (default):** comportamento inalterado; o composer manual segue igual.
 
 ### Persistência dos dados (volumes Docker)
@@ -283,6 +290,51 @@ suba explicitamente com o profile e aponte o `.env` para ele:
 docker compose --profile mock up -d mock-meta
 # no .env (apenas para esse modo legado):  META_API_BASE_URL=http://localhost:8001
 ```
+
+### Fluxo principal do desafio (auto-reply via mock-meta, sem frontend)
+
+O caminho avaliado é **100% backend**: a resposta é gerada e enviada pelo **worker**,
+sem qualquer ação no frontend (os botões "Sugerir IA"/"Enviar" do composer são
+**auxiliares/opcionais**). Configure o `.env` em modo mock e ligue o auto-reply:
+
+```env
+WHATSAPP_AUTO_REPLY_ENABLED=true                      # OBRIGATÓRIO no desafio
+META_API_BASE_URL=http://localhost:8001               # mock (backend no host)
+META_APP_SECRET=super-secret-app-secret-trocar        # = secret do mock-meta
+META_PHONE_NUMBER_ID=123456789012345                  # = phone_number_id do mock
+META_TOKEN=placeholder                                # mock ignora Authorization
+OPENAI_API_KEY=<sua-chave-real>                       # worker chama OpenAI
+```
+
+```bash
+# 1. infra + mock + seed + processos
+docker compose up -d postgres redis
+docker compose --profile mock up -d mock-meta
+npm run db:migrate && npm run db:seed
+npm run dev        # terminal A (API :8000)
+npm run dev:worker # terminal B (worker — loga "autoReplyEnabled: true")
+
+# 2. simular a mensagem do cliente (NENHUMA ação no frontend)
+curl -X POST http://localhost:8001/simulate/inbound \
+  -H "Content-Type: application/json" \
+  -d '{ "from": "5511999990000", "text": "Quais são os planos de vocês?" }'
+
+# 3. verificar o envio que o worker fez para a Meta (mock)
+curl -s http://localhost:8001/sent      # → registro com to=5511999990000 e o texto da IA
+
+# 4. verificar persistência via REST (tenant-scoped)
+curl -s http://localhost:8000/conversations
+curl -s http://localhost:8000/conversations/<conversationId>/messages
+# → inbound "Quais são os planos..." (in) + outbound resposta da IA (out, status sent)
+```
+
+Logs esperados (backend → worker):
+`POST /webhook 200` → `message processing job enqueued` →
+`worker processing inbound message` → `message processing job handled` (`aiSource: openai`) →
+`[meta] message sent successfully` → `[auto-reply] resposta enviada ao cliente` → `worker job completed`.
+
+A resposta é **fundamentada na `knowledge-base/`**; o prompt instrui o modelo a usar
+apenas a base e a dizer quando não souber (não inventa preços/políticas).
 
 ### Modo mock vs modo real (envio outbound)
 

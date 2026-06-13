@@ -256,6 +256,196 @@ describe("MessageProcessingProcessor", () => {
     expect(sendMessage).toHaveBeenCalledTimes(1);
   });
 
+  describe("human takeover (operador respondeu manualmente)", () => {
+    const INBOUND_TIME = new Date("2026-01-01T10:00:00.000Z");
+    const inbound = {
+      id: "message-1",
+      tenantId: "tenant-1",
+      direction: "inbound",
+      body: "quais planos?",
+      replyToMessageId: null,
+      createdAt: INBOUND_TIME,
+    };
+
+    function build(opts: {
+      conversationMessages: Array<Record<string, unknown>>;
+      sendMessage: ReturnType<typeof vi.fn>;
+      generateResponse?: ReturnType<typeof vi.fn>;
+    }) {
+      const findByConversationId = vi
+        .fn()
+        .mockResolvedValue(opts.conversationMessages);
+      const generateResponse =
+        opts.generateResponse ??
+        vi.fn().mockResolvedValue({ text: "resposta IA", source: "stub" });
+      const processor = createMessageProcessingProcessor({
+        messageRepository: {
+          findById: vi.fn().mockResolvedValue(inbound),
+          findByConversationId,
+        },
+        conversationRepository: {
+          findById: vi
+            .fn()
+            .mockResolvedValue({ id: "conversation-1", tenantId: "tenant-1" }),
+        },
+        aiResponseService: { generateResponse },
+        log: createLogger({ test: "takeover" }),
+        autoReplyEnabled: true,
+        outboundService: { sendMessage: opts.sendMessage },
+      });
+      return { processor, findByConversationId, generateResponse };
+    }
+
+    const job = {
+      tenantId: "tenant-1",
+      conversationId: "conversation-1",
+      messageId: "message-1",
+      externalMessageId: "wamid.in-1",
+      phoneNumberId: "123456789012345",
+      contactPhone: "5511999990000",
+    };
+
+    function out(overrides: Record<string, unknown>) {
+      return {
+        id: "out-x",
+        tenantId: "tenant-1",
+        direction: "outbound",
+        body: "...",
+        replyToMessageId: null,
+        createdAt: new Date("2026-01-01T10:05:00.000Z"),
+        ...overrides,
+      };
+    }
+
+    it("(a) sem outbound manual: auto-reply envia", async () => {
+      const sendMessage = vi.fn().mockResolvedValue({ id: "out-1" });
+      const { processor } = build({
+        conversationMessages: [inbound],
+        sendMessage,
+      });
+
+      await processor.processMessageJob(job);
+
+      expect(sendMessage).toHaveBeenCalledTimes(1);
+    });
+
+    it("(b) com outbound manual posterior: NÃO envia e NÃO chama a IA", async () => {
+      const sendMessage = vi.fn();
+      const generateResponse = vi.fn();
+      const { processor } = build({
+        conversationMessages: [
+          inbound,
+          out({ id: "manual-1", replyToMessageId: null }), // manual, depois do inbound
+        ],
+        sendMessage,
+        generateResponse,
+      });
+
+      const result = await processor.processMessageJob(job);
+
+      expect(result).toMatchObject({
+        processed: false,
+        skipped: true,
+        reason: "manually_answered",
+      });
+      expect(sendMessage).not.toHaveBeenCalled();
+      expect(generateResponse).not.toHaveBeenCalled(); // economiza OpenAI
+    });
+
+    it("(c) com outbound manual ANTERIOR ao inbound: auto-reply ainda envia", async () => {
+      const sendMessage = vi.fn().mockResolvedValue({ id: "out-1" });
+      const { processor } = build({
+        conversationMessages: [
+          out({
+            id: "manual-old",
+            replyToMessageId: null,
+            createdAt: new Date("2026-01-01T09:00:00.000Z"), // antes do inbound
+          }),
+          inbound,
+        ],
+        sendMessage,
+      });
+
+      await processor.processMessageJob(job);
+
+      expect(sendMessage).toHaveBeenCalledTimes(1);
+    });
+
+    it("(d) outbound auto-reply (replyToMessageId != null) NÃO conta como takeover", async () => {
+      const sendMessage = vi.fn().mockResolvedValue({ id: "out-1" });
+      const { processor } = build({
+        conversationMessages: [
+          inbound,
+          out({ id: "auto-1", replyToMessageId: "message-1" }), // auto-reply
+        ],
+        sendMessage,
+      });
+
+      await processor.processMessageJob(job);
+
+      // Não é bloqueado pelo takeover (é auto-reply, não manual). A idempotência
+      // real de duplicidade é tratada no WhatsAppOutboundService.
+      expect(sendMessage).toHaveBeenCalledTimes(1);
+    });
+
+    it("(b2) operador responde DURANTE a IA: chama IA mas NÃO envia (2ª checagem)", async () => {
+      const sendMessage = vi.fn();
+      const generateResponse = vi
+        .fn()
+        .mockResolvedValue({ text: "resposta IA", source: "stub" });
+      // 1ª busca (pré-IA): sem manual → IA roda. 2ª busca (pré-envio): manual
+      // surgiu durante a geração → bloqueia o envio.
+      const findByConversationId = vi
+        .fn()
+        .mockResolvedValueOnce([inbound])
+        .mockResolvedValueOnce([
+          inbound,
+          out({ id: "manual-mid", replyToMessageId: null }),
+        ]);
+      const processor = createMessageProcessingProcessor({
+        messageRepository: {
+          findById: vi.fn().mockResolvedValue(inbound),
+          findByConversationId,
+        },
+        conversationRepository: {
+          findById: vi
+            .fn()
+            .mockResolvedValue({ id: "conversation-1", tenantId: "tenant-1" }),
+        },
+        aiResponseService: { generateResponse },
+        log: createLogger({ test: "takeover" }),
+        autoReplyEnabled: true,
+        outboundService: { sendMessage },
+      });
+
+      const result = await processor.processMessageJob(job);
+
+      expect(generateResponse).toHaveBeenCalledTimes(1); // IA foi chamada
+      expect(sendMessage).not.toHaveBeenCalled(); // mas não enviou
+      expect(result).toMatchObject({
+        processed: false,
+        skipped: true,
+        reason: "manually_answered",
+      });
+      expect(findByConversationId).toHaveBeenCalledTimes(2); // double-check
+    });
+
+    it("(e) checagem é tenant+conversa-scoped (usa findByConversationId com o tenantId)", async () => {
+      const sendMessage = vi.fn().mockResolvedValue({ id: "out-1" });
+      const { processor, findByConversationId } = build({
+        conversationMessages: [inbound],
+        sendMessage,
+      });
+
+      await processor.processMessageJob(job);
+
+      expect(findByConversationId).toHaveBeenCalledWith(
+        "tenant-1",
+        "conversation-1"
+      );
+    });
+  });
+
   it("retorna skipped quando mensagem nao existe", async () => {
     const processor = createMessageProcessingProcessor({
       messageRepository: {

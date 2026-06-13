@@ -141,4 +141,64 @@ describeDatabase("auto-reply E2E (inbound → worker → outbound)", () => {
     expect(outbound?.body).toBe("Temos o Fibra 300 por R$ 79,90.");
     expect(outbound?.externalMessageId).toBe(`${marker}-out-wamid`);
   });
+
+  it("human takeover: outbound manual após o inbound bloqueia o auto-reply", async () => {
+    // Novo inbound + uma resposta MANUAL (replyToMessageId NULL) criada depois.
+    const [inbound2] = await database
+      .insert(whatsappMessages)
+      .values({
+        tenantId,
+        conversationId,
+        direction: "inbound",
+        body: "tem desconto?",
+        status: "received",
+        externalMessageId: `${marker}-in2-wamid`,
+      })
+      .returning();
+
+    await database.insert(whatsappMessages).values({
+      tenantId,
+      conversationId,
+      direction: "outbound",
+      body: "Oi! Aqui é a atendente Ana, vou te ajudar.",
+      status: "sent",
+      externalMessageId: `${marker}-manual-wamid`,
+      replyToMessageId: null, // manual: sem replyToMessageId
+    });
+
+    const callsBefore = metaCalls.length;
+    const outboundService = new WhatsAppOutboundService({ metaClient: fakeMeta });
+    const processor = createMessageProcessingProcessor({
+      autoReplyEnabled: true,
+      outboundService,
+      aiResponseService: {
+        generateResponse: async () => ({ text: "nao deveria enviar", source: "stub" }),
+      },
+    });
+
+    const result = await processor.processMessageJob({
+      tenantId,
+      conversationId,
+      messageId: inbound2!.id,
+      externalMessageId: `${marker}-in2-wamid`,
+      phoneNumberId: `${marker}-phone`,
+      contactPhone: "5511966665555",
+      displayPhoneNumber: `${marker}-display`,
+    });
+
+    expect(result).toMatchObject({ skipped: true, reason: "manually_answered" });
+    // Meta NÃO foi chamada de novo (operador já respondeu).
+    expect(metaCalls.length).toBe(callsBefore);
+    // Não há auto-reply (replyToMessageId) para este inbound.
+    const replies = await database
+      .select()
+      .from(whatsappMessages)
+      .where(
+        and(
+          eq(whatsappMessages.tenantId, tenantId),
+          eq(whatsappMessages.replyToMessageId, inbound2!.id)
+        )
+      );
+    expect(replies).toHaveLength(0);
+  });
 });
