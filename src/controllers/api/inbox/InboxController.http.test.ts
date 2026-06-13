@@ -44,6 +44,7 @@ const inboxService = {
       createdAt: "2026-06-12T12:00:00.000Z",
     },
   ]),
+  markConversationAsRead: vi.fn().mockResolvedValue(undefined),
   suggestReply: vi.fn().mockResolvedValue({
     suggestion: "Claro, posso ajudar com isso.",
     source: "openai",
@@ -138,6 +139,18 @@ describe("GET /conversations/:id/messages", () => {
         createdAt: "2026-06-12T12:00:00.000Z",
       },
     ]);
+  });
+});
+
+describe("POST /conversations/:id/read", () => {
+  it("marca a conversa como lida para o operador atual", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/conversations/conv-1/read",
+    });
+
+    expect(res.statusCode).toBe(204);
+    expect(inboxService.markConversationAsRead).toHaveBeenCalledWith("conv-1");
   });
 });
 

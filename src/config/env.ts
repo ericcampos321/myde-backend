@@ -61,6 +61,7 @@ const envSchema = z.object({
 
   OPENAI_API_KEY: z.string().optional(),
   OPENAI_MODEL: z.string().min(1).default("gpt-5.4"),
+  INBOX_OPERATOR_ID: z.string().min(1).optional(),
 
   // Auto-resposta opcional do worker: quando "true", após gerar a sugestão de IA
   // o worker envia a resposta ao cliente pela Meta. Default seguro: desligado.

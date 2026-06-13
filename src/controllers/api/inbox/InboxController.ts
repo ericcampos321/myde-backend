@@ -16,7 +16,12 @@ interface ContactsQuerystring {
 export interface InboxControllerOptions extends FastifyPluginOptions {
   inboxService?: Pick<
     InboxService,
-    "getMe" | "listConversations" | "listMessages" | "listContacts" | "suggestReply"
+    | "getMe"
+    | "listConversations"
+    | "listMessages"
+    | "listContacts"
+    | "suggestReply"
+    | "markConversationAsRead"
   >;
 }
 
@@ -66,6 +71,26 @@ export async function inboxController(
     },
     async (request) => {
       return inboxService.listMessages(request.params.conversationId);
+    }
+  );
+
+  app.post<{ Params: ConversationParams }>(
+    "/conversations/:conversationId/read",
+    {
+      schema: {
+        params: {
+          type: "object",
+          required: ["conversationId"],
+          properties: {
+            conversationId: { type: "string", minLength: 1 },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      await inboxService.markConversationAsRead(request.params.conversationId);
+      reply.status(204);
+      return null;
     }
   );
 

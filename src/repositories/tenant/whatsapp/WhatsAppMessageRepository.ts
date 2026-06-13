@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, isNotNull } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull } from "drizzle-orm";
 import { db, type Database } from "../../../db/client.js";
 import { whatsappMessages } from "../../../db/schema/index.js";
 import type {
@@ -72,6 +72,39 @@ export class WhatsAppMessageRepository {
         )
       )
       .orderBy(asc(whatsappMessages.createdAt));
+  }
+
+  async findLatestByConversationId(tenantId: string, conversationId: string) {
+    const [message] = await this.database
+      .select()
+      .from(whatsappMessages)
+      .where(
+        and(
+          eq(whatsappMessages.tenantId, tenantId),
+          eq(whatsappMessages.conversationId, conversationId)
+        )
+      )
+      .orderBy(desc(whatsappMessages.createdAt))
+      .limit(1);
+
+    return message ?? null;
+  }
+
+  async findLatestInboundByConversationId(tenantId: string, conversationId: string) {
+    const [message] = await this.database
+      .select()
+      .from(whatsappMessages)
+      .where(
+        and(
+          eq(whatsappMessages.tenantId, tenantId),
+          eq(whatsappMessages.conversationId, conversationId),
+          eq(whatsappMessages.direction, "inbound")
+        )
+      )
+      .orderBy(desc(whatsappMessages.createdAt))
+      .limit(1);
+
+    return message ?? null;
   }
 
   async findByConversationIds(tenantId: string, conversationIds: string[]) {

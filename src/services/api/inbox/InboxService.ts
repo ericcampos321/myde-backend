@@ -1,12 +1,14 @@
 import { AppError } from "../../../errors/AppError.js";
 import { env, hasOpenAi } from "../../../config/env.js";
 import {
+  ConversationReadStateRepository,
   WhatsAppContactRepository,
   WhatsAppConversationRepository,
   WhatsAppMessageRepository,
   WhatsAppTenantRepository,
 } from "../../../repositories/tenant/whatsapp/index.js";
 import { createAiResponseService } from "../../tenant/ai/index.js";
+import { InboxOperatorIdentityResolver } from "./InboxOperatorIdentityResolver.js";
 
 const AVATAR_COLORS = [
   "#2F855A",
@@ -74,7 +76,18 @@ export interface InboxServiceDependencies {
   contactRepository?: Pick<WhatsAppContactRepository, "findByIds" | "listByTenant">;
   messageRepository?: Pick<
     WhatsAppMessageRepository,
-    "findByConversationId" | "findByConversationIds"
+    | "findByConversationId"
+    | "findByConversationIds"
+    | "findLatestByConversationId"
+    | "findLatestInboundByConversationId"
+  >;
+  readStateRepository?: Pick<
+    ConversationReadStateRepository,
+    "findByConversationId" | "findByConversationIds" | "upsert"
+  >;
+  operatorIdentityResolver?: Pick<
+    InboxOperatorIdentityResolver,
+    "getCurrentOperatorId"
   >;
 }
 
@@ -83,6 +96,8 @@ export class InboxService {
   private readonly conversationRepository: Required<InboxServiceDependencies>["conversationRepository"];
   private readonly contactRepository: Required<InboxServiceDependencies>["contactRepository"];
   private readonly messageRepository: Required<InboxServiceDependencies>["messageRepository"];
+  private readonly readStateRepository: Required<InboxServiceDependencies>["readStateRepository"];
+  private readonly operatorIdentityResolver: Required<InboxServiceDependencies>["operatorIdentityResolver"];
 
   constructor(dependencies: InboxServiceDependencies = {}) {
     this.tenantRepository =
@@ -93,6 +108,10 @@ export class InboxService {
       dependencies.contactRepository ?? new WhatsAppContactRepository();
     this.messageRepository =
       dependencies.messageRepository ?? new WhatsAppMessageRepository();
+    this.readStateRepository =
+      dependencies.readStateRepository ?? new ConversationReadStateRepository();
+    this.operatorIdentityResolver =
+      dependencies.operatorIdentityResolver ?? new InboxOperatorIdentityResolver();
   }
 
   async getMe(): Promise<InboxAgentProfile> {
@@ -111,6 +130,7 @@ export class InboxService {
 
   async listConversations(): Promise<InboxConversationSummary[]> {
     const tenant = await this.resolveCurrentTenant();
+    const operatorId = this.operatorIdentityResolver.getCurrentOperatorId();
     const conversations = await this.conversationRepository.listByTenant(tenant.id);
 
     if (conversations.length === 0) {
@@ -118,17 +138,39 @@ export class InboxService {
     }
 
     const contactIds = [...new Set(conversations.map((conversation) => conversation.contactId))];
-    const contacts = await this.contactRepository.findByIds(tenant.id, contactIds);
+    const conversationIds = conversations.map((conversation) => conversation.id);
+    const [contacts, messages, readStates] = await Promise.all([
+      this.contactRepository.findByIds(tenant.id, contactIds),
+      this.messageRepository.findByConversationIds(tenant.id, conversationIds),
+      this.readStateRepository.findByConversationIds(
+        tenant.id,
+        operatorId,
+        conversationIds
+      ),
+    ]);
     const contactsById = new Map(contacts.map((contact) => [contact.id, contact]));
-
-    const messages = await this.messageRepository.findByConversationIds(
-      tenant.id,
-      conversations.map((conversation) => conversation.id)
-    );
     const lastMessageByConversationId = new Map<string, string>();
+    const unreadByConversationId = new Map<string, number>();
+    const readStateByConversationId = new Map(
+      readStates.map((state) => [state.conversationId, state])
+    );
 
     for (const message of messages) {
       lastMessageByConversationId.set(message.conversationId, message.body);
+
+      if (message.direction !== "inbound") {
+        continue;
+      }
+
+      const lastReadAt = readStateByConversationId.get(message.conversationId)?.lastReadAt;
+      const isUnread = !lastReadAt || message.createdAt > lastReadAt;
+
+      if (isUnread) {
+        unreadByConversationId.set(
+          message.conversationId,
+          (unreadByConversationId.get(message.conversationId) ?? 0) + 1
+        );
+      }
     }
 
     return conversations.map((conversation) => {
@@ -143,10 +185,51 @@ export class InboxService {
         contactName,
         contactPhone: contact?.phone ?? "",
         avatarColor: pickAvatarColor(conversation.contactId),
-        unread: 0,
+        unread: unreadByConversationId.get(conversation.id) ?? 0,
         lastMessage,
         lastMessageAt: (conversation.lastMessageAt ?? conversation.createdAt).toISOString(),
       };
+    });
+  }
+
+  async markConversationAsRead(conversationId: string): Promise<void> {
+    const tenant = await this.resolveCurrentTenant();
+    await this.assertConversationExists(tenant.id, conversationId);
+
+    const operatorId = this.operatorIdentityResolver.getCurrentOperatorId();
+    const [currentReadState, latestInboundMessage, latestMessage] = await Promise.all([
+      this.readStateRepository.findByConversationId(
+        tenant.id,
+        operatorId,
+        conversationId
+      ),
+      this.messageRepository.findLatestInboundByConversationId(
+        tenant.id,
+        conversationId
+      ),
+      this.messageRepository.findLatestByConversationId(tenant.id, conversationId),
+    ]);
+
+    if (!latestInboundMessage) {
+      return;
+    }
+
+    const alreadyReadByMessageId =
+      currentReadState?.lastReadMessageId === latestInboundMessage.id;
+    const alreadyReadByTimestamp =
+      !!currentReadState?.lastReadAt &&
+      currentReadState.lastReadAt >= latestInboundMessage.createdAt;
+
+    if (alreadyReadByMessageId || alreadyReadByTimestamp) {
+      return;
+    }
+
+    await this.readStateRepository.upsert({
+      tenantId: tenant.id,
+      conversationId,
+      operatorId,
+      lastReadAt: new Date(),
+      lastReadMessageId: latestMessage?.id ?? latestInboundMessage.id,
     });
   }
 
