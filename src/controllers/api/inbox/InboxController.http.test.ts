@@ -51,6 +51,10 @@ const inboxService = {
   suggestReply: vi.fn().mockResolvedValue({
     suggestion: "Claro, posso ajudar com isso.",
     source: "openai",
+    blocked: false,
+    riskLevel: "low",
+    riskReasons: [],
+    userMessage: null,
   }),
 };
 
@@ -202,6 +206,10 @@ describe("POST /ai/suggest", () => {
     expect(res.json()).toEqual({
       suggestion: "Claro, posso ajudar com isso.",
       source: "openai",
+      blocked: false,
+      riskLevel: "low",
+      riskReasons: [],
+      userMessage: null,
     });
   });
 });

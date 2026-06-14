@@ -9,7 +9,10 @@ import {
   WhatsAppMessageRepository,
   WhatsAppTenantRepository,
 } from "../../../repositories/tenant/whatsapp/index.js";
-import { createAiResponseService } from "../../tenant/ai/index.js";
+import {
+  AiSuggestionService,
+} from "../../tenant/ai/index.js";
+import type { AiSuggestionResult } from "../../../types/tenant/ai/AiSuggestionTypes.js";
 import { InboxOperatorIdentityResolver } from "./InboxOperatorIdentityResolver.js";
 
 const AVATAR_COLORS = [
@@ -55,10 +58,7 @@ export interface InboxMessageDto {
   createdAt: string;
 }
 
-export interface InboxSuggestionDto {
-  suggestion: string;
-  source: "openai" | "stub";
-}
+export type InboxSuggestionDto = AiSuggestionResult;
 
 export interface InboxContactDto {
   id: string;
@@ -110,6 +110,7 @@ export interface InboxServiceDependencies {
     InboxRecentSearchRepository,
     "listByOperator" | "saveAndTrim" | "clearByOperator"
   >;
+  aiSuggestionService?: Pick<AiSuggestionService, "suggest">;
 }
 
 export class InboxService {
@@ -120,6 +121,7 @@ export class InboxService {
   private readonly readStateRepository: Required<InboxServiceDependencies>["readStateRepository"];
   private readonly operatorIdentityResolver: Required<InboxServiceDependencies>["operatorIdentityResolver"];
   private readonly recentSearchRepository: Required<InboxServiceDependencies>["recentSearchRepository"];
+  private readonly aiSuggestionService: Required<InboxServiceDependencies>["aiSuggestionService"];
 
   constructor(dependencies: InboxServiceDependencies = {}) {
     this.tenantRepository =
@@ -136,6 +138,8 @@ export class InboxService {
       dependencies.operatorIdentityResolver ?? new InboxOperatorIdentityResolver();
     this.recentSearchRepository =
       dependencies.recentSearchRepository ?? new InboxRecentSearchRepository();
+    this.aiSuggestionService =
+      dependencies.aiSuggestionService ?? new AiSuggestionService({});
   }
 
   async getMe(): Promise<InboxAgentProfile> {
@@ -400,7 +404,7 @@ export class InboxService {
     }
 
     const tenant = await this.resolveCurrentTenant();
-    await this.assertConversationExists(tenant.id, conversationId);
+    const conversation = await this.getConversationOrThrow(tenant.id, conversationId);
 
     const messages = await this.messageRepository.findByConversationId(
       tenant.id,
@@ -425,19 +429,17 @@ export class InboxService {
       });
     }
 
-    const aiResponseService = createAiResponseService();
-    const result = await aiResponseService.generateResponse({
-      currentMessage: currentMessage.body,
-      conversationHistory: messages.slice(0, targetIndex).map((message) => ({
-        direction: message.direction,
-        body: message.body,
+    return this.aiSuggestionService.suggest({
+      tenantId: tenant.id,
+      conversationId: conversation.id,
+      contactId: conversation.contactId,
+      operatorId: this.operatorIdentityResolver.getCurrentOperatorId(),
+      userMessage: currentMessage.body,
+      history: messages.slice(0, targetIndex).map((message) => ({
+        role: message.direction === "inbound" ? "user" : "assistant",
+        content: message.body,
       })),
     });
-
-    return {
-      suggestion: result.text,
-      source: result.source,
-    };
   }
 
   private async resolveCurrentTenant() {
@@ -470,6 +472,10 @@ export class InboxService {
     tenantId: string,
     conversationId: string
   ): Promise<void> {
+    await this.getConversationOrThrow(tenantId, conversationId);
+  }
+
+  private async getConversationOrThrow(tenantId: string, conversationId: string) {
     const conversation = await this.conversationRepository.findById(
       tenantId,
       conversationId
@@ -482,6 +488,8 @@ export class InboxService {
         statusCode: 404,
       });
     }
+
+    return conversation;
   }
 }
 
