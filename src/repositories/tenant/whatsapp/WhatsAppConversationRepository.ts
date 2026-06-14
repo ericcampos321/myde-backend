@@ -20,6 +20,20 @@ export class WhatsAppConversationRepository {
     return conversation ?? null;
   }
 
+  async findByContactId(tenantId: string, contactId: string) {
+    const [conversation] = await this.database
+      .select()
+      .from(whatsappConversations)
+      .where(
+        and(
+          eq(whatsappConversations.tenantId, tenantId),
+          eq(whatsappConversations.contactId, contactId)
+        )
+      )
+      .limit(1);
+    return conversation ?? null;
+  }
+
   async upsertOpenByContact(data: UpsertOpenConversationInput) {
     const [conversation] = await this.database
       .insert(whatsappConversations)

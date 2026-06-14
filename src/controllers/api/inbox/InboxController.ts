@@ -13,6 +13,11 @@ interface ContactsQuerystring {
   q?: string;
 }
 
+interface RecentSearchBody {
+  targetType: "conversation" | "contact";
+  targetId: string;
+}
+
 export interface InboxControllerOptions extends FastifyPluginOptions {
   inboxService?: Pick<
     InboxService,
@@ -22,6 +27,9 @@ export interface InboxControllerOptions extends FastifyPluginOptions {
     | "listContacts"
     | "suggestReply"
     | "markConversationAsRead"
+    | "listRecentSearches"
+    | "saveRecentSearch"
+    | "clearRecentSearches"
   >;
 }
 
@@ -37,6 +45,41 @@ export async function inboxController(
 
   app.get("/conversations", async () => {
     return inboxService.listConversations();
+  });
+
+  app.get("/recent-searches", async () => {
+    return inboxService.listRecentSearches();
+  });
+
+  app.post<{ Body: RecentSearchBody }>(
+    "/recent-searches",
+    {
+      schema: {
+        body: {
+          type: "object",
+          required: ["targetType", "targetId"],
+          additionalProperties: false,
+          properties: {
+            targetType: { type: "string", enum: ["conversation", "contact"] },
+            targetId: { type: "string", minLength: 1 },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      await inboxService.saveRecentSearch(
+        request.body.targetType,
+        request.body.targetId
+      );
+      reply.status(204);
+      return null;
+    }
+  );
+
+  app.delete("/recent-searches", async (_request, reply) => {
+    await inboxService.clearRecentSearches();
+    reply.status(204);
+    return null;
   });
 
   app.get<{ Querystring: ContactsQuerystring }>(

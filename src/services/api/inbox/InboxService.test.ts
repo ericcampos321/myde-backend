@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { InboxService } from "./InboxService.js";
+import { AppError } from "../../../errors/AppError.js";
 
 /**
  * Garante o contrato consumido pelo frontend: sem conversas, o endpoint retorna
@@ -432,6 +433,191 @@ describe("InboxService unread state", () => {
         lastReadMessageId: "msg-3",
       })
     );
+  });
+
+  it("markConversationAsRead repetido sem nova inbound nao faz update", async () => {
+    const findByPhoneNumberId = vi.fn().mockResolvedValue(tenant);
+    const findById = vi.fn().mockResolvedValue({
+      id: "conv-1",
+      tenantId: tenant.id,
+      contactId: "contact-1",
+      status: "open",
+      lastMessageAt: new Date("2026-06-12T12:05:00.000Z"),
+      createdAt: new Date("2026-06-12T10:00:00.000Z"),
+      updatedAt: new Date("2026-06-12T12:05:00.000Z"),
+    });
+    const findByConversationId = vi.fn().mockResolvedValue({
+      id: "state-1",
+      tenantId: tenant.id,
+      conversationId: "conv-1",
+      operatorId: "operator-1",
+      lastReadAt: new Date("2026-06-12T12:10:00.000Z"),
+      lastReadMessageId: "msg-3",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    const findLatestInboundByConversationId = vi.fn().mockResolvedValue({
+      id: "msg-3",
+      tenantId: tenant.id,
+      conversationId: "conv-1",
+      direction: "inbound",
+      body: "Nova inbound",
+      status: "received",
+      externalMessageId: null,
+      failureCode: null,
+      failureReason: null,
+      failedAt: null,
+      replyToMessageId: null,
+      createdAt: new Date("2026-06-12T12:00:00.000Z"),
+      updatedAt: new Date("2026-06-12T12:00:00.000Z"),
+    });
+    const upsert = vi.fn();
+
+    const service = new InboxService({
+      tenantRepository: { findByPhoneNumberId },
+      conversationRepository: { listByTenant: vi.fn(), findById },
+      contactRepository: { findByIds: vi.fn(), listByTenant: vi.fn() },
+      messageRepository: {
+        findByConversationId: vi.fn(),
+        findByConversationIds: vi.fn(),
+        findLatestByConversationId: vi.fn(),
+        findLatestInboundByConversationId,
+      },
+      readStateRepository: {
+        findByConversationId,
+        findByConversationIds: vi.fn(),
+        upsert,
+      },
+      operatorIdentityResolver: {
+        getCurrentOperatorId: () => "operator-1",
+      },
+    });
+
+    await service.markConversationAsRead("conv-1");
+
+    expect(findByConversationId).toHaveBeenCalledWith(
+      tenant.id,
+      "operator-1",
+      "conv-1"
+    );
+    expect(upsert).not.toHaveBeenCalled();
+  });
+
+  it("nova inbound posterior permite novo update", async () => {
+    const findByPhoneNumberId = vi.fn().mockResolvedValue(tenant);
+    const findById = vi.fn().mockResolvedValue({
+      id: "conv-1",
+      tenantId: tenant.id,
+      contactId: "contact-1",
+      status: "open",
+      lastMessageAt: new Date("2026-06-12T12:30:00.000Z"),
+      createdAt: new Date("2026-06-12T10:00:00.000Z"),
+      updatedAt: new Date("2026-06-12T12:30:00.000Z"),
+    });
+    const findByConversationId = vi.fn().mockResolvedValue({
+      id: "state-1",
+      tenantId: tenant.id,
+      conversationId: "conv-1",
+      operatorId: "operator-1",
+      lastReadAt: new Date("2026-06-12T12:10:00.000Z"),
+      lastReadMessageId: "msg-3",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    const findLatestInboundByConversationId = vi.fn().mockResolvedValue({
+      id: "msg-4",
+      tenantId: tenant.id,
+      conversationId: "conv-1",
+      direction: "inbound",
+      body: "Inbound mais nova",
+      status: "received",
+      externalMessageId: null,
+      failureCode: null,
+      failureReason: null,
+      failedAt: null,
+      replyToMessageId: null,
+      createdAt: new Date("2026-06-12T12:20:00.000Z"),
+      updatedAt: new Date("2026-06-12T12:20:00.000Z"),
+    });
+    const findLatestByConversationId = vi.fn().mockResolvedValue({
+      id: "msg-5",
+      tenantId: tenant.id,
+      conversationId: "conv-1",
+      direction: "outbound",
+      body: "Resposta mais nova",
+      status: "sent",
+      externalMessageId: null,
+      failureCode: null,
+      failureReason: null,
+      failedAt: null,
+      replyToMessageId: null,
+      createdAt: new Date("2026-06-12T12:30:00.000Z"),
+      updatedAt: new Date("2026-06-12T12:30:00.000Z"),
+    });
+    const upsert = vi.fn().mockResolvedValue(undefined);
+
+    const service = new InboxService({
+      tenantRepository: { findByPhoneNumberId },
+      conversationRepository: { listByTenant: vi.fn(), findById },
+      contactRepository: { findByIds: vi.fn(), listByTenant: vi.fn() },
+      messageRepository: {
+        findByConversationId: vi.fn(),
+        findByConversationIds: vi.fn(),
+        findLatestByConversationId,
+        findLatestInboundByConversationId,
+      },
+      readStateRepository: {
+        findByConversationId,
+        findByConversationIds: vi.fn(),
+        upsert,
+      },
+      operatorIdentityResolver: {
+        getCurrentOperatorId: () => "operator-1",
+      },
+    });
+
+    await service.markConversationAsRead("conv-1");
+
+    expect(upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tenantId: tenant.id,
+        conversationId: "conv-1",
+        operatorId: "operator-1",
+        lastReadMessageId: "msg-5",
+      })
+    );
+  });
+
+  it("conversa de outro tenant retorna 404", async () => {
+    const findByPhoneNumberId = vi.fn().mockResolvedValue(tenant);
+    const findById = vi.fn().mockResolvedValue(null);
+    const upsert = vi.fn();
+
+    const service = new InboxService({
+      tenantRepository: { findByPhoneNumberId },
+      conversationRepository: { listByTenant: vi.fn(), findById },
+      contactRepository: { findByIds: vi.fn(), listByTenant: vi.fn() },
+      messageRepository: {
+        findByConversationId: vi.fn(),
+        findByConversationIds: vi.fn(),
+        findLatestByConversationId: vi.fn(),
+        findLatestInboundByConversationId: vi.fn(),
+      },
+      readStateRepository: {
+        findByConversationId: vi.fn(),
+        findByConversationIds: vi.fn(),
+        upsert,
+      },
+      operatorIdentityResolver: {
+        getCurrentOperatorId: () => "operator-1",
+      },
+    });
+
+    await expect(service.markConversationAsRead("conv-1")).rejects.toMatchObject<AppError>({
+      code: "CONVERSATION_NOT_FOUND",
+      statusCode: 404,
+    });
+    expect(upsert).not.toHaveBeenCalled();
   });
 
   it("leitura de um operador nao zera para outro", async () => {

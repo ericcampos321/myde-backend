@@ -1,7 +1,9 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
 import { closeDb, db } from "../../../db/client.js";
 import {
+  inboxRecentSearches,
   tenants,
   whatsappContacts,
   whatsappConversations,
@@ -11,6 +13,7 @@ import { WhatsAppContactRepository } from "./index.js";
 import { WhatsAppConversationRepository } from "./index.js";
 import { WhatsAppMessageRepository } from "./index.js";
 import { WhatsAppTenantRepository } from "./index.js";
+import { InboxRecentSearchRepository } from "./index.js";
 
 const runDatabaseTests = process.env.RUN_DB_TESTS === "true";
 const describeDatabase = runDatabaseTests ? describe : describe.skip;
@@ -22,6 +25,7 @@ const tenantRepository = new WhatsAppTenantRepository();
 const contactRepository = new WhatsAppContactRepository();
 const conversationRepository = new WhatsAppConversationRepository();
 const messageRepository = new WhatsAppMessageRepository();
+const recentSearchRepository = new InboxRecentSearchRepository();
 
 async function createTenant() {
   const tenant = await tenantRepository.create({
@@ -53,6 +57,9 @@ afterAll(async () => {
   if (!runDatabaseTests) return;
 
   for (const tenantId of createdTenantIds) {
+    await db
+      .delete(inboxRecentSearches)
+      .where(eq(inboxRecentSearches.tenantId, tenantId));
     await db.delete(whatsappMessages).where(eq(whatsappMessages.tenantId, tenantId));
     await db
       .delete(whatsappConversations)
@@ -111,6 +118,70 @@ describeDatabase("repositories com PostgreSQL", () => {
 
     expect(updated?.id).toBe(conversation.id);
     expect(updated?.status).toBe("open");
+  });
+
+  it("recent searches faz upsert sem duplicar e mantem somente quatro", async () => {
+    const tenant = await createTenant();
+    const operatorId = "operator-recent-limit";
+    const targetIds = Array.from({ length: 5 }, () => randomUUID());
+
+    await recentSearchRepository.saveAndTrim({
+      tenantId: tenant.id,
+      operatorId,
+      targetType: "conversation",
+      targetId: targetIds[0]!,
+    });
+    await recentSearchRepository.saveAndTrim({
+      tenantId: tenant.id,
+      operatorId,
+      targetType: "conversation",
+      targetId: targetIds[0]!,
+    });
+
+    for (const targetId of targetIds.slice(1)) {
+      await recentSearchRepository.saveAndTrim({
+        tenantId: tenant.id,
+        operatorId,
+        targetType: "conversation",
+        targetId,
+      });
+    }
+
+    const recent = await recentSearchRepository.listByOperator(
+      tenant.id,
+      operatorId,
+      10
+    );
+
+    expect(recent).toHaveLength(4);
+    expect(new Set(recent.map((item) => item.targetId)).size).toBe(4);
+    expect(recent.some((item) => item.targetId === targetIds[4])).toBe(true);
+  });
+
+  it("recent searches limpa somente o operador solicitado", async () => {
+    const tenant = await createTenant();
+
+    await recentSearchRepository.saveAndTrim({
+      tenantId: tenant.id,
+      operatorId: "operator-a",
+      targetType: "contact",
+      targetId: randomUUID(),
+    });
+    await recentSearchRepository.saveAndTrim({
+      tenantId: tenant.id,
+      operatorId: "operator-b",
+      targetType: "contact",
+      targetId: randomUUID(),
+    });
+
+    await recentSearchRepository.clearByOperator(tenant.id, "operator-a");
+
+    await expect(
+      recentSearchRepository.listByOperator(tenant.id, "operator-a")
+    ).resolves.toEqual([]);
+    await expect(
+      recentSearchRepository.listByOperator(tenant.id, "operator-b")
+    ).resolves.toHaveLength(1);
   });
 
   it("cria inbound e encontra por externalMessageId", async () => {

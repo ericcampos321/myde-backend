@@ -2,6 +2,8 @@ import { AppError } from "../../../errors/AppError.js";
 import { env, hasOpenAi } from "../../../config/env.js";
 import {
   ConversationReadStateRepository,
+  InboxRecentSearchRepository,
+  type InboxRecentSearchTargetType,
   WhatsAppContactRepository,
   WhatsAppConversationRepository,
   WhatsAppMessageRepository,
@@ -67,13 +69,28 @@ export interface InboxContactDto {
   updatedAt: string;
 }
 
+export interface InboxRecentSearchDto {
+  id: string;
+  targetType: InboxRecentSearchTargetType;
+  targetId: string;
+  conversationId: string | null;
+  label: string;
+  subtitle: string;
+  avatarInitials: string;
+  updatedAt: string;
+  canOpen: boolean;
+}
+
 export interface InboxServiceDependencies {
   tenantRepository?: Pick<WhatsAppTenantRepository, "findByPhoneNumberId">;
   conversationRepository?: Pick<
     WhatsAppConversationRepository,
-    "findById" | "listByTenant"
+    "findById" | "findByContactId" | "listByTenant"
   >;
-  contactRepository?: Pick<WhatsAppContactRepository, "findByIds" | "listByTenant">;
+  contactRepository?: Pick<
+    WhatsAppContactRepository,
+    "findById" | "findByIds" | "listByTenant"
+  >;
   messageRepository?: Pick<
     WhatsAppMessageRepository,
     | "findByConversationId"
@@ -89,6 +106,10 @@ export interface InboxServiceDependencies {
     InboxOperatorIdentityResolver,
     "getCurrentOperatorId"
   >;
+  recentSearchRepository?: Pick<
+    InboxRecentSearchRepository,
+    "listByOperator" | "saveAndTrim" | "clearByOperator"
+  >;
 }
 
 export class InboxService {
@@ -98,6 +119,7 @@ export class InboxService {
   private readonly messageRepository: Required<InboxServiceDependencies>["messageRepository"];
   private readonly readStateRepository: Required<InboxServiceDependencies>["readStateRepository"];
   private readonly operatorIdentityResolver: Required<InboxServiceDependencies>["operatorIdentityResolver"];
+  private readonly recentSearchRepository: Required<InboxServiceDependencies>["recentSearchRepository"];
 
   constructor(dependencies: InboxServiceDependencies = {}) {
     this.tenantRepository =
@@ -112,6 +134,8 @@ export class InboxService {
       dependencies.readStateRepository ?? new ConversationReadStateRepository();
     this.operatorIdentityResolver =
       dependencies.operatorIdentityResolver ?? new InboxOperatorIdentityResolver();
+    this.recentSearchRepository =
+      dependencies.recentSearchRepository ?? new InboxRecentSearchRepository();
   }
 
   async getMe(): Promise<InboxAgentProfile> {
@@ -265,6 +289,106 @@ export class InboxService {
     }));
   }
 
+  async listRecentSearches(): Promise<InboxRecentSearchDto[]> {
+    const tenant = await this.resolveCurrentTenant();
+    const operatorId = this.operatorIdentityResolver.getCurrentOperatorId();
+    const recentSearches = await this.recentSearchRepository.listByOperator(
+      tenant.id,
+      operatorId,
+      4
+    );
+
+    const items = await Promise.all(
+      recentSearches.map(async (recent): Promise<InboxRecentSearchDto | null> => {
+        if (recent.targetType === "conversation") {
+          const conversation = await this.conversationRepository.findById(
+            tenant.id,
+            recent.targetId
+          );
+          if (!conversation) return null;
+
+          const contact = await this.contactRepository.findById(
+            tenant.id,
+            conversation.contactId
+          );
+          const label = contact?.name?.trim() || "Contato sem nome";
+
+          return {
+            id: recent.id,
+            targetType: recent.targetType,
+            targetId: recent.targetId,
+            conversationId: conversation.id,
+            label,
+            subtitle: contact?.phone ?? "",
+            avatarInitials: getInitials(label),
+            updatedAt: recent.updatedAt.toISOString(),
+            canOpen: true,
+          };
+        }
+
+        const contact = await this.contactRepository.findById(tenant.id, recent.targetId);
+        if (!contact) return null;
+
+        const conversation = await this.conversationRepository.findByContactId(
+          tenant.id,
+          contact.id
+        );
+        const label = contact.name?.trim() || "Contato sem nome";
+
+        return {
+          id: recent.id,
+          targetType: recent.targetType,
+          targetId: recent.targetId,
+          conversationId: conversation?.id ?? null,
+          label,
+          subtitle: contact.phone,
+          avatarInitials: getInitials(label),
+          updatedAt: recent.updatedAt.toISOString(),
+          canOpen: Boolean(conversation),
+        };
+      })
+    );
+
+    return items.filter((item): item is InboxRecentSearchDto => item !== null);
+  }
+
+  async saveRecentSearch(
+    targetType: InboxRecentSearchTargetType,
+    targetId: string
+  ): Promise<void> {
+    const tenant = await this.resolveCurrentTenant();
+    const operatorId = this.operatorIdentityResolver.getCurrentOperatorId();
+
+    const target =
+      targetType === "conversation"
+        ? await this.conversationRepository.findById(tenant.id, targetId)
+        : await this.contactRepository.findById(tenant.id, targetId);
+
+    if (!target) {
+      throw new AppError({
+        code: "RECENT_SEARCH_TARGET_NOT_FOUND",
+        message: "Recent search target not found for the configured tenant.",
+        statusCode: 404,
+      });
+    }
+
+    await this.recentSearchRepository.saveAndTrim(
+      {
+        tenantId: tenant.id,
+        operatorId,
+        targetType,
+        targetId,
+      },
+      4
+    );
+  }
+
+  async clearRecentSearches(): Promise<void> {
+    const tenant = await this.resolveCurrentTenant();
+    const operatorId = this.operatorIdentityResolver.getCurrentOperatorId();
+    await this.recentSearchRepository.clearByOperator(tenant.id, operatorId);
+  }
+
   async suggestReply(conversationId: string): Promise<InboxSuggestionDto> {
     if (!hasOpenAi) {
       throw new AppError({
@@ -400,4 +524,12 @@ function pickAvatarColor(seed: string): string {
   }
 
   return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length] ?? AVATAR_COLORS[0];
+}
+
+function getInitials(label: string): string {
+  return label
+    .split(" ")
+    .slice(0, 2)
+    .map((word) => word[0]?.toUpperCase() ?? "")
+    .join("");
 }

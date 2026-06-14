@@ -45,6 +45,9 @@ const inboxService = {
     },
   ]),
   markConversationAsRead: vi.fn().mockResolvedValue(undefined),
+  listRecentSearches: vi.fn().mockResolvedValue([]),
+  saveRecentSearch: vi.fn().mockResolvedValue(undefined),
+  clearRecentSearches: vi.fn().mockResolvedValue(undefined),
   suggestReply: vi.fn().mockResolvedValue({
     suggestion: "Claro, posso ajudar com isso.",
     source: "openai",
@@ -93,6 +96,36 @@ describe("GET /conversations", () => {
         lastMessageAt: "2026-06-12T12:00:00.000Z",
       },
     ]);
+  });
+});
+
+describe("recent searches", () => {
+  it("GET /recent-searches retorna os recentes do operador atual", async () => {
+    const res = await app.inject({ method: "GET", url: "/recent-searches" });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual([]);
+  });
+
+  it("POST /recent-searches salva somente targetType e targetId", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/recent-searches",
+      payload: { targetType: "conversation", targetId: "conv-1" },
+    });
+
+    expect(res.statusCode).toBe(204);
+    expect(inboxService.saveRecentSearch).toHaveBeenCalledWith(
+      "conversation",
+      "conv-1"
+    );
+  });
+
+  it("DELETE /recent-searches limpa os recentes do operador atual", async () => {
+    const res = await app.inject({ method: "DELETE", url: "/recent-searches" });
+
+    expect(res.statusCode).toBe(204);
+    expect(inboxService.clearRecentSearches).toHaveBeenCalledTimes(1);
   });
 });
 
