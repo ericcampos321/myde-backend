@@ -8,6 +8,38 @@
 const DEFAULT_SEARCH_LIMIT = 20;
 const MAX_SEARCH_LIMIT = 50;
 const DEFAULT_PREVIEW_MAX = 200;
+const SEARCH_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+export interface SearchDateRange {
+  start: Date;
+  end: Date;
+}
+
+/**
+ * Converte `YYYY-MM-DD` em um intervalo diário UTC [início, próximo dia).
+ * Retorna null para formato ou data de calendário inválidos.
+ */
+export function parseSearchDate(
+  value: string | null | undefined
+): SearchDateRange | null {
+  if (!value || !SEARCH_DATE_PATTERN.test(value)) return null;
+
+  const [year, month, day] = value.split("-").map(Number);
+  const start = new Date(Date.UTC(year!, month! - 1, day!));
+
+  if (
+    start.getUTCFullYear() !== year ||
+    start.getUTCMonth() !== month! - 1 ||
+    start.getUTCDate() !== day
+  ) {
+    return null;
+  }
+
+  return {
+    start,
+    end: new Date(Date.UTC(year!, month! - 1, day! + 1)),
+  };
+}
 
 /**
  * Escapa os caracteres especiais de LIKE/ILIKE (`\`, `%`, `_`) para que o termo

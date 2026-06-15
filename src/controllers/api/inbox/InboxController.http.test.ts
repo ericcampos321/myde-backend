@@ -222,12 +222,13 @@ describe("GET /conversations/:id/messages/search", () => {
   it("repassa q/limit/cursor e retorna o envelope paginado", async () => {
     const res = await app.inject({
       method: "GET",
-      url: "/conversations/conv-1/messages/search?q=aju&limit=20&cursor=abc",
+      url: "/conversations/conv-1/messages/search?q=aju&date=2026-06-15&limit=20&cursor=abc",
     });
 
     expect(res.statusCode).toBe(200);
     expect(inboxService.searchMessages).toHaveBeenCalledWith("conv-1", {
       q: "aju",
+      date: "2026-06-15",
       limit: 20,
       cursor: "abc",
     });

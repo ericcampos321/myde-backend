@@ -24,6 +24,7 @@ import {
   clampSearchLimit,
   escapeLikeSearchTerm,
   MESSAGE_SEARCH,
+  parseSearchDate,
 } from "./inboxMessageSearch.js";
 
 /** Quantidade de mensagens recentes usada como contexto da sugestão de IA. */
@@ -350,26 +351,34 @@ export class InboxService {
 
   async searchMessages(
     conversationId: string,
-    options: { q?: string; limit?: unknown; cursor?: string } = {}
+    options: { q?: string; date?: string; limit?: unknown; cursor?: string } = {}
   ): Promise<InboxMessageSearchPageDto> {
     const tenant = await this.resolveCurrentTenant();
     await this.assertConversationExists(tenant.id, conversationId);
 
     const term = (options.q ?? "").trim().slice(0, MESSAGE_SEARCH.maxTermLength);
+    const hasDateInput = options.date !== undefined && options.date !== "";
+    const dateRange = parseSearchDate(options.date);
 
-    // Termo curto: resposta vazia, sem tocar o banco (UX fluida, sem 400).
-    if (term.length < MESSAGE_SEARCH.minTermLength) {
+    // Sem termo válido/data ou com data inválida: vazio sem tocar o banco.
+    if (
+      (term.length < MESSAGE_SEARCH.minTermLength && !dateRange) ||
+      (hasDateInput && !dateRange)
+    ) {
       return { items: [], nextCursor: null, hasMore: false };
     }
 
     const limit = clampSearchLimit(options.limit);
     const cursor = decodeMessageCursor(options.cursor);
-    const bodyIlikePattern = `%${escapeLikeSearchTerm(term)}%`;
+    const bodyIlikePattern =
+      term.length >= MESSAGE_SEARCH.minTermLength
+        ? `%${escapeLikeSearchTerm(term)}%`
+        : undefined;
 
     const { items, hasMore } = await this.messageRepository.searchByConversationId(
       tenant.id,
       conversationId,
-      { bodyIlikePattern, limit, cursor }
+      { bodyIlikePattern, dateRange, limit, cursor }
     );
 
     const results = items.map((message): InboxMessageSearchResultDto => {

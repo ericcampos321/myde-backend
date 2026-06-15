@@ -1280,6 +1280,50 @@ describe("InboxService.searchMessages", () => {
     expect(search).not.toHaveBeenCalled();
   });
 
+  it("data válida sem q chama o repositório com intervalo diário", async () => {
+    const search = vi.fn().mockResolvedValue({ items: [], hasMore: false });
+    const service = buildService(search);
+
+    await service.searchMessages("conv-1", { date: "2026-06-15" });
+
+    expect(search).toHaveBeenCalledWith("tenant-1", "conv-1", {
+      bodyIlikePattern: undefined,
+      dateRange: {
+        start: new Date("2026-06-15T00:00:00.000Z"),
+        end: new Date("2026-06-16T00:00:00.000Z"),
+      },
+      limit: 20,
+      cursor: null,
+    });
+  });
+
+  it("q válido + data repassa ambos os filtros", async () => {
+    const search = vi.fn().mockResolvedValue({ items: [], hasMore: false });
+    const service = buildService(search);
+
+    await service.searchMessages("conv-1", { q: "eric", date: "2026-06-15" });
+
+    expect(search).toHaveBeenCalledWith("tenant-1", "conv-1", {
+      bodyIlikePattern: "%eric%",
+      dateRange: {
+        start: new Date("2026-06-15T00:00:00.000Z"),
+        end: new Date("2026-06-16T00:00:00.000Z"),
+      },
+      limit: 20,
+      cursor: null,
+    });
+  });
+
+  it("data inválida retorna vazio sem tocar o repositório", async () => {
+    const search = vi.fn();
+    const service = buildService(search);
+
+    await expect(
+      service.searchMessages("conv-1", { q: "eric", date: "2026-02-30" })
+    ).resolves.toEqual({ items: [], nextCursor: null, hasMore: false });
+    expect(search).not.toHaveBeenCalled();
+  });
+
   it("escapa o termo, clampa o limit e repassa scoping", async () => {
     const search = vi.fn().mockResolvedValue({ items: [], hasMore: false });
     const service = buildService(search);
@@ -1288,6 +1332,7 @@ describe("InboxService.searchMessages", () => {
 
     expect(search).toHaveBeenCalledWith("tenant-1", "conv-1", {
       bodyIlikePattern: "%100\\%%",
+      dateRange: null,
       limit: 50,
       cursor: null,
     });
@@ -1340,6 +1385,7 @@ describe("InboxService.searchMessages", () => {
 
     expect(search).toHaveBeenCalledWith("tenant-1", "conv-1", {
       bodyIlikePattern: "%eric%",
+      dateRange: null,
       limit: 20,
       cursor: { createdAtMs: 1000, id: "id-9" },
     });

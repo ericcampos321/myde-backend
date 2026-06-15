@@ -530,6 +530,35 @@ describeDatabase("busca de mensagens (searchByConversationId)", () => {
     expect(p2.items.some((m) => m.id === last.id)).toBe(false);
   });
 
+  it("aplica intervalo de data junto com tenant e conversa", async () => {
+    const { tenant, conversation } = await seed();
+
+    await messageRepository.createInbound({
+      tenantId: tenant.id,
+      conversationId: conversation.id,
+      body: "Mensagem fora da data",
+      externalMessageId: `${marker}-search-outside-date`,
+      createdAt: new Date("2026-06-13T10:00:00.000Z"),
+    });
+
+    const page = await messageRepository.searchByConversationId(
+      tenant.id,
+      conversation.id,
+      {
+        dateRange: {
+          start: new Date("2026-06-12T00:00:00.000Z"),
+          end: new Date("2026-06-13T00:00:00.000Z"),
+        },
+        limit: 20,
+      }
+    );
+
+    expect(page.items).toHaveLength(4);
+    expect(page.items.every((message) => message.createdAt.getUTCDate() === 12)).toBe(
+      true
+    );
+  });
+
   it("é tenant+conversation-scoped (não vaza outra conversa)", async () => {
     const { tenant, conversation } = await seed();
     const otherContact = await contactRepository.upsertByPhone({

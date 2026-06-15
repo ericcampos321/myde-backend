@@ -4,7 +4,23 @@ import {
   clampSearchLimit,
   escapeLikeSearchTerm,
   MESSAGE_SEARCH,
+  parseSearchDate,
 } from "./inboxMessageSearch.js";
+
+describe("parseSearchDate", () => {
+  it("aceita YYYY-MM-DD válido e cria intervalo UTC do dia", () => {
+    expect(parseSearchDate("2026-06-15")).toEqual({
+      start: new Date("2026-06-15T00:00:00.000Z"),
+      end: new Date("2026-06-16T00:00:00.000Z"),
+    });
+  });
+
+  it("rejeita formato e datas de calendário inválidos", () => {
+    expect(parseSearchDate("15/06/2026")).toBeNull();
+    expect(parseSearchDate("2026-02-30")).toBeNull();
+    expect(parseSearchDate(undefined)).toBeNull();
+  });
+});
 
 describe("escapeLikeSearchTerm", () => {
   it("escapa %, _ e \\ (barra primeiro)", () => {

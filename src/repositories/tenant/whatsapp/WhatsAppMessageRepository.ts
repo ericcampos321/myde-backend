@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, isNotNull, lt, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNotNull, lt, or, sql } from "drizzle-orm";
 import { db, type Database } from "../../../db/client.js";
 import {
   whatsappMessages,
@@ -152,18 +152,31 @@ export class WhatsAppMessageRepository {
     tenantId: string,
     conversationId: string,
     options: {
-      bodyIlikePattern: string;
+      bodyIlikePattern?: string;
+      dateRange?: { start: Date; end: Date } | null;
       limit: number;
       cursor?: { createdAtMs: number; id: string } | null;
     }
   ): Promise<{ items: WhatsAppMessageRow[]; hasMore: boolean }> {
-    const { bodyIlikePattern, limit, cursor } = options;
+    const { bodyIlikePattern, dateRange, limit, cursor } = options;
 
     const conditions = [
       eq(whatsappMessages.tenantId, tenantId),
       eq(whatsappMessages.conversationId, conversationId),
-      sql`${whatsappMessages.body} ILIKE ${bodyIlikePattern} ESCAPE '\\'`,
     ];
+
+    if (bodyIlikePattern) {
+      conditions.push(
+        sql`${whatsappMessages.body} ILIKE ${bodyIlikePattern} ESCAPE '\\'`
+      );
+    }
+
+    if (dateRange) {
+      conditions.push(
+        gte(whatsappMessages.createdAt, dateRange.start),
+        lt(whatsappMessages.createdAt, dateRange.end)
+      );
+    }
 
     if (cursor) {
       const cursorDate = new Date(cursor.createdAtMs);

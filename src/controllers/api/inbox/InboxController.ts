@@ -20,6 +20,7 @@ interface MessagesQuerystring {
 
 interface MessagesSearchQuerystring {
   q?: string;
+  date?: string;
   limit?: number;
   cursor?: string;
 }
@@ -157,6 +158,7 @@ export async function inboxController(
           type: "object",
           properties: {
             q: { type: "string" },
+            date: { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}$" },
             limit: { type: "integer", minimum: 1, maximum: 50 },
             cursor: { type: "string", minLength: 1 },
           },
@@ -166,6 +168,7 @@ export async function inboxController(
     async (request) => {
       return inboxService.searchMessages(request.params.conversationId, {
         q: request.query.q,
+        date: request.query.date,
         limit: request.query.limit,
         cursor: request.query.cursor,
       });
