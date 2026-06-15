@@ -352,3 +352,101 @@ describeDatabase("travas multi-tenant no banco", () => {
     ).rejects.toThrow();
   });
 });
+
+describeDatabase("paginação de mensagens (findPageByConversationId)", () => {
+  async function seedMessages(count: number) {
+    const { tenant, conversation } = await createConversation();
+    const base = Date.UTC(2026, 5, 12, 10, 0, 0);
+    for (let i = 0; i < count; i += 1) {
+      await messageRepository.createInbound({
+        tenantId: tenant.id,
+        conversationId: conversation.id,
+        body: `msg-${i}`,
+        externalMessageId: `${marker}-page-${conversation.id}-${i}`,
+        // 1 min de diferença entre mensagens (i=0 mais antiga).
+        createdAt: new Date(base + i * 60_000),
+      });
+    }
+    return { tenant, conversation };
+  }
+
+  it("respeita o limit, devolve ASC e sinaliza hasMore", async () => {
+    const { tenant, conversation } = await seedMessages(5);
+
+    const page = await messageRepository.findPageByConversationId(
+      tenant.id,
+      conversation.id,
+      { limit: 3 }
+    );
+
+    expect(page.hasMore).toBe(true);
+    expect(page.items).toHaveLength(3);
+    // Últimas 3 (mais recentes), em ordem ASC.
+    expect(page.items.map((m) => m.body)).toEqual(["msg-2", "msg-3", "msg-4"]);
+  });
+
+  it("before retorna a página anterior sem duplicar a mensagem do cursor", async () => {
+    const { tenant, conversation } = await seedMessages(5);
+
+    const firstPage = await messageRepository.findPageByConversationId(
+      tenant.id,
+      conversation.id,
+      { limit: 3 }
+    );
+    const oldest = firstPage.items[0]!; // msg-2
+    const secondPage = await messageRepository.findPageByConversationId(
+      tenant.id,
+      conversation.id,
+      { limit: 3, before: { createdAtMs: oldest.createdAt.getTime(), id: oldest.id } }
+    );
+
+    expect(secondPage.hasMore).toBe(false);
+    expect(secondPage.items.map((m) => m.body)).toEqual(["msg-0", "msg-1"]);
+    // Não inclui a mensagem do cursor (msg-2).
+    expect(secondPage.items.some((m) => m.id === oldest.id)).toBe(false);
+  });
+
+  it("hasMore=false quando a conversa cabe na página", async () => {
+    const { tenant, conversation } = await seedMessages(2);
+
+    const page = await messageRepository.findPageByConversationId(
+      tenant.id,
+      conversation.id,
+      { limit: 30 }
+    );
+
+    expect(page.hasMore).toBe(false);
+    expect(page.items.map((m) => m.body)).toEqual(["msg-0", "msg-1"]);
+  });
+
+  it("é tenant+conversation-scoped (não vaza outra conversa)", async () => {
+    const { tenant, conversation } = await seedMessages(2);
+    // Outra conversa do MESMO tenant não deve aparecer.
+    const otherContact = await contactRepository.upsertByPhone({
+      tenantId: tenant.id,
+      phone: "5511988887777",
+      name: "Outro",
+    });
+    const otherConversation = await conversationRepository.upsertOpenByContact({
+      tenantId: tenant.id,
+      contactId: otherContact!.id,
+      lastMessageAt: new Date(),
+    });
+    await messageRepository.createInbound({
+      tenantId: tenant.id,
+      conversationId: otherConversation!.id,
+      body: "outra-conversa",
+      externalMessageId: `${marker}-other-conv`,
+      createdAt: new Date(),
+    });
+
+    const page = await messageRepository.findPageByConversationId(
+      tenant.id,
+      conversation.id,
+      { limit: 30 }
+    );
+
+    expect(page.items.every((m) => m.conversationId === conversation.id)).toBe(true);
+    expect(page.items.map((m) => m.body)).toEqual(["msg-0", "msg-1"]);
+  });
+});

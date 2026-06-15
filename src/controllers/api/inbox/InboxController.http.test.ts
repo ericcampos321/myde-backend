@@ -35,15 +35,19 @@ const inboxService = {
       updatedAt: "2026-06-12T12:00:00.000Z",
     },
   ]),
-  listMessages: vi.fn().mockResolvedValue([
-    {
-      id: "msg-1",
-      direction: "in",
-      body: "Oi, preciso de ajuda",
-      status: "sent",
-      createdAt: "2026-06-12T12:00:00.000Z",
-    },
-  ]),
+  listMessagesPage: vi.fn().mockResolvedValue({
+    items: [
+      {
+        id: "msg-1",
+        direction: "in",
+        body: "Oi, preciso de ajuda",
+        status: "sent",
+        createdAt: "2026-06-12T12:00:00.000Z",
+      },
+    ],
+    nextCursor: null,
+    hasMore: false,
+  }),
   markConversationAsRead: vi.fn().mockResolvedValue(undefined),
   listRecentSearches: vi.fn().mockResolvedValue([]),
   saveRecentSearch: vi.fn().mockResolvedValue(undefined),
@@ -166,16 +170,36 @@ describe("GET /conversations/:id/messages", () => {
     });
 
     expect(res.statusCode).toBe(200);
-    expect(inboxService.listMessages).toHaveBeenCalledWith("conv-1");
-    expect(res.json()).toEqual([
-      {
-        id: "msg-1",
-        direction: "in",
-        body: "Oi, preciso de ajuda",
-        status: "sent",
-        createdAt: "2026-06-12T12:00:00.000Z",
-      },
-    ]);
+    expect(inboxService.listMessagesPage).toHaveBeenCalledWith("conv-1", {
+      limit: undefined,
+      before: undefined,
+    });
+    expect(res.json()).toEqual({
+      items: [
+        {
+          id: "msg-1",
+          direction: "in",
+          body: "Oi, preciso de ajuda",
+          status: "sent",
+          createdAt: "2026-06-12T12:00:00.000Z",
+        },
+      ],
+      nextCursor: null,
+      hasMore: false,
+    });
+  });
+
+  it("repassa limit e before do querystring ao service", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: "/conversations/conv-1/messages?limit=10&before=abc123",
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(inboxService.listMessagesPage).toHaveBeenCalledWith("conv-1", {
+      limit: 10,
+      before: "abc123",
+    });
   });
 });
 

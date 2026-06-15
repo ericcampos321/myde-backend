@@ -13,6 +13,11 @@ interface ContactsQuerystring {
   q?: string;
 }
 
+interface MessagesQuerystring {
+  limit?: number;
+  before?: string;
+}
+
 interface RecentSearchBody {
   targetType: "conversation" | "contact";
   targetId: string;
@@ -23,7 +28,7 @@ export interface InboxControllerOptions extends FastifyPluginOptions {
     InboxService,
     | "getMe"
     | "listConversations"
-    | "listMessages"
+    | "listMessagesPage"
     | "listContacts"
     | "suggestReply"
     | "markConversationAsRead"
@@ -99,7 +104,7 @@ export async function inboxController(
     }
   );
 
-  app.get<{ Params: ConversationParams }>(
+  app.get<{ Params: ConversationParams; Querystring: MessagesQuerystring }>(
     "/conversations/:conversationId/messages",
     {
       schema: {
@@ -110,10 +115,20 @@ export async function inboxController(
             conversationId: { type: "string", minLength: 1 },
           },
         },
+        querystring: {
+          type: "object",
+          properties: {
+            limit: { type: "integer", minimum: 1, maximum: 50 },
+            before: { type: "string", minLength: 1 },
+          },
+        },
       },
     },
     async (request) => {
-      return inboxService.listMessages(request.params.conversationId);
+      return inboxService.listMessagesPage(request.params.conversationId, {
+        limit: request.query.limit,
+        before: request.query.before,
+      });
     }
   );
 

@@ -14,6 +14,14 @@ import {
 } from "../../tenant/ai/index.js";
 import type { AiSuggestionResult } from "../../../types/tenant/ai/AiSuggestionTypes.js";
 import { InboxOperatorIdentityResolver } from "./InboxOperatorIdentityResolver.js";
+import {
+  clampMessageLimit,
+  decodeMessageCursor,
+  encodeMessageCursor,
+} from "./inboxMessageCursor.js";
+
+/** Quantidade de mensagens recentes usada como contexto da sugestão de IA. */
+const AI_HISTORY_FETCH_LIMIT = 30;
 
 const AVATAR_COLORS = [
   "#2F855A",
@@ -41,6 +49,8 @@ export interface InboxConversationSummary {
   avatarColor: string;
   unread: number;
   lastMessage: string;
+  lastMessageDirection: "inbound" | "outbound" | null;
+  lastMessageStatus: "pending" | InboxMessageStatus | null;
   lastMessageAt: string;
 }
 
@@ -56,6 +66,12 @@ export interface InboxMessageDto {
   body: string;
   status: InboxMessageStatus;
   createdAt: string;
+}
+
+export interface InboxMessagePageDto {
+  items: InboxMessageDto[];
+  nextCursor: string | null;
+  hasMore: boolean;
 }
 
 export type InboxSuggestionDto = AiSuggestionResult;
@@ -93,7 +109,8 @@ export interface InboxServiceDependencies {
   >;
   messageRepository?: Pick<
     WhatsAppMessageRepository,
-    | "findByConversationId"
+    | "findPageByConversationId"
+    | "findRecentByConversationId"
     | "findByConversationIds"
     | "findLatestByConversationId"
     | "findLatestInboundByConversationId"
@@ -177,14 +194,25 @@ export class InboxService {
       ),
     ]);
     const contactsById = new Map(contacts.map((contact) => [contact.id, contact]));
-    const lastMessageByConversationId = new Map<string, string>();
+    const lastMessageMetaByConversationId = new Map<
+      string,
+      {
+        body: string;
+        direction: "inbound" | "outbound";
+        status: string;
+      }
+    >();
     const unreadByConversationId = new Map<string, number>();
     const readStateByConversationId = new Map(
       readStates.map((state) => [state.conversationId, state])
     );
 
     for (const message of messages) {
-      lastMessageByConversationId.set(message.conversationId, message.body);
+      lastMessageMetaByConversationId.set(message.conversationId, {
+        body: message.body,
+        direction: message.direction,
+        status: message.status,
+      });
 
       if (message.direction !== "inbound") {
         continue;
@@ -204,9 +232,8 @@ export class InboxService {
     return conversations.map((conversation) => {
       const contact = contactsById.get(conversation.contactId);
       const contactName = contact?.name?.trim() || "Contato sem nome";
-      const lastMessage =
-        lastMessageByConversationId.get(conversation.id) ??
-        "Conversa iniciada no WhatsApp";
+      const lastMessageMeta = lastMessageMetaByConversationId.get(conversation.id);
+      const lastMessage = lastMessageMeta?.body ?? "Conversa iniciada no WhatsApp";
 
       return {
         id: conversation.id,
@@ -215,6 +242,11 @@ export class InboxService {
         avatarColor: pickAvatarColor(conversation.contactId),
         unread: unreadByConversationId.get(conversation.id) ?? 0,
         lastMessage,
+        lastMessageDirection: lastMessageMeta?.direction ?? null,
+        lastMessageStatus:
+          lastMessageMeta?.direction === "outbound"
+            ? normalizeConversationPreviewStatus(lastMessageMeta.status)
+            : null,
         lastMessageAt: (conversation.lastMessageAt ?? conversation.createdAt).toISOString(),
       };
     });
@@ -261,22 +293,36 @@ export class InboxService {
     });
   }
 
-  async listMessages(conversationId: string): Promise<InboxMessageDto[]> {
+  async listMessagesPage(
+    conversationId: string,
+    options: { limit?: unknown; before?: string } = {}
+  ): Promise<InboxMessagePageDto> {
     const tenant = await this.resolveCurrentTenant();
     await this.assertConversationExists(tenant.id, conversationId);
 
-    const messages = await this.messageRepository.findByConversationId(
+    const limit = clampMessageLimit(options.limit);
+    const before = decodeMessageCursor(options.before);
+
+    const { items, hasMore } = await this.messageRepository.findPageByConversationId(
       tenant.id,
-      conversationId
+      conversationId,
+      { limit, before }
     );
 
-    return messages.map((message) => ({
+    const messages = items.map((message) => ({
       id: message.id,
-      direction: message.direction === "inbound" ? "in" : "out",
+      direction:
+        message.direction === "inbound" ? ("in" as const) : ("out" as const),
       body: message.body,
       status: normalizeMessageStatus(message.status),
       createdAt: message.createdAt.toISOString(),
     }));
+
+    // items vêm ASC; o mais antigo da página é o primeiro → cursor da próxima página.
+    const oldest = items[0];
+    const nextCursor = hasMore && oldest ? encodeMessageCursor(oldest) : null;
+
+    return { items: messages, nextCursor, hasMore };
   }
 
   async listContacts(searchTerm?: string): Promise<InboxContactDto[]> {
@@ -406,9 +452,12 @@ export class InboxService {
     const tenant = await this.resolveCurrentTenant();
     const conversation = await this.getConversationOrThrow(tenant.id, conversationId);
 
-    const messages = await this.messageRepository.findByConversationId(
+    // Bounded: usa só as últimas N mensagens como contexto da IA (sem carregar
+    // a conversa inteira). A detecção do último inbound + history continua igual.
+    const messages = await this.messageRepository.findRecentByConversationId(
       tenant.id,
-      conversationId
+      conversationId,
+      AI_HISTORY_FETCH_LIMIT
     );
     const targetIndex = findLastInboundMessageIndex(messages);
 
@@ -521,6 +570,16 @@ function normalizeMessageStatus(status: string): InboxMessageStatus {
   }
 
   return "sent";
+}
+
+function normalizeConversationPreviewStatus(
+  status: string
+): "pending" | InboxMessageStatus {
+  if (status === "pending") {
+    return "pending";
+  }
+
+  return normalizeMessageStatus(status);
 }
 
 function pickAvatarColor(seed: string): string {

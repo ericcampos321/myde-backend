@@ -1,6 +1,9 @@
-import { and, asc, desc, eq, inArray, isNotNull } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, lt, or } from "drizzle-orm";
 import { db, type Database } from "../../../db/client.js";
-import { whatsappMessages } from "../../../db/schema/index.js";
+import {
+  whatsappMessages,
+  type WhatsAppMessageRow,
+} from "../../../db/schema/index.js";
 import type {
   CreateInboundMessageInput,
   CreateOutboundMessageInput,
@@ -61,6 +64,11 @@ export class WhatsAppMessageRepository {
     return message;
   }
 
+  /**
+   * Histórico COMPLETO da conversa (ASC), tenant-scoped. Usado por fluxos que
+   * precisam de todas as mensagens (ex.: auto-reply do worker). O inbox usa a
+   * versão paginada/bounded abaixo.
+   */
   async findByConversationId(tenantId: string, conversationId: string) {
     return this.database
       .select()
@@ -72,6 +80,66 @@ export class WhatsAppMessageRepository {
         )
       )
       .orderBy(asc(whatsappMessages.createdAt));
+  }
+
+  /**
+   * Página de mensagens da conversa (cursor por `(createdAt, id)`), tenant-scoped.
+   * Sem `before`: as `limit` mais recentes. Com `before`: as `limit` mais antigas
+   * que o cursor. Busca DESC + `limit + 1` (para `hasMore`) e devolve ASC.
+   */
+  async findPageByConversationId(
+    tenantId: string,
+    conversationId: string,
+    options: { limit: number; before?: { createdAtMs: number; id: string } | null }
+  ): Promise<{ items: WhatsAppMessageRow[]; hasMore: boolean }> {
+    const { limit, before } = options;
+
+    const conditions = [
+      eq(whatsappMessages.tenantId, tenantId),
+      eq(whatsappMessages.conversationId, conversationId),
+    ];
+
+    if (before) {
+      const cursorDate = new Date(before.createdAtMs);
+      conditions.push(
+        or(
+          lt(whatsappMessages.createdAt, cursorDate),
+          and(
+            eq(whatsappMessages.createdAt, cursorDate),
+            lt(whatsappMessages.id, before.id)
+          )
+        )!
+      );
+    }
+
+    const rows = await this.database
+      .select()
+      .from(whatsappMessages)
+      .where(and(...conditions))
+      .orderBy(desc(whatsappMessages.createdAt), desc(whatsappMessages.id))
+      .limit(limit + 1);
+
+    const hasMore = rows.length > limit;
+    const page = hasMore ? rows.slice(0, limit) : rows;
+    // DESC → reverte para ASC (ordem cronológica de renderização).
+    page.reverse();
+
+    return { items: page, hasMore };
+  }
+
+  /**
+   * Últimas `limit` mensagens da conversa em ordem ASC (contexto de IA).
+   * Reusa a query paginada sem cursor; descarta `hasMore`.
+   */
+  async findRecentByConversationId(
+    tenantId: string,
+    conversationId: string,
+    limit: number
+  ): Promise<WhatsAppMessageRow[]> {
+    const { items } = await this.findPageByConversationId(tenantId, conversationId, {
+      limit,
+    });
+    return items;
   }
 
   async findLatestByConversationId(tenantId: string, conversationId: string) {

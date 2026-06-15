@@ -116,6 +116,39 @@ describe("AiInteractionLogService", () => {
     });
   });
 
+  it("não derruba a sugestão quando a tabela ai_interaction_logs ainda não existe ao gravar", async () => {
+    const repository = {
+      create: vi.fn().mockRejectedValue({
+        code: "42P01",
+        message: 'relation "ai_interaction_logs" does not exist',
+      }),
+      countRecentHighRisk: vi.fn(),
+    };
+    const service = new AiInteractionLogService(repository);
+
+    await expect(service.record(baseInput)).resolves.toBeUndefined();
+  });
+
+  it("retorna zero quando a tabela ai_interaction_logs ainda não existe ao contar abuso recente", async () => {
+    const repository = {
+      create: vi.fn(),
+      countRecentHighRisk: vi.fn().mockRejectedValue({
+        code: "42P01",
+        message: 'relation "ai_interaction_logs" does not exist',
+      }),
+    };
+    const service = new AiInteractionLogService(repository);
+    const since = new Date("2026-06-14T12:00:00.000Z");
+
+    await expect(
+      service.countRecentHighRisk({
+        tenantId: "tenant-1",
+        conversationId: "conversation-1",
+        since,
+      })
+    ).resolves.toBe(0);
+  });
+
   it("mantem o contrato sem campos sensiveis no input tipado", () => {
     expect(hasNoSensitiveFields).toBe(true);
   });

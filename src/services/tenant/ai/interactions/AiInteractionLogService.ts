@@ -15,11 +15,27 @@ export class AiInteractionLogService {
   ) {}
 
   async record(input: AiInteractionLogCreateInput): Promise<void> {
-    await this.repository.create(normalizeLogInput(input));
+    try {
+      await this.repository.create(normalizeLogInput(input));
+    } catch (error) {
+      if (isMissingAiInteractionLogsTableError(error)) {
+        return;
+      }
+
+      throw error;
+    }
   }
 
   async countRecentHighRisk(input: AiRecentHighRiskCountInput): Promise<number> {
-    return this.repository.countRecentHighRisk(input);
+    try {
+      return await this.repository.countRecentHighRisk(input);
+    } catch (error) {
+      if (isMissingAiInteractionLogsTableError(error)) {
+        return 0;
+      }
+
+      throw error;
+    }
   }
 }
 
@@ -46,4 +62,19 @@ function clampCount(value: number): number {
   }
 
   return Math.max(0, Math.trunc(value));
+}
+
+function isMissingAiInteractionLogsTableError(error: unknown): boolean {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  const code = "code" in error ? error.code : null;
+  const message = "message" in error ? error.message : null;
+
+  return (
+    code === "42P01" &&
+    typeof message === "string" &&
+    message.includes('relation "ai_interaction_logs" does not exist')
+  );
 }
