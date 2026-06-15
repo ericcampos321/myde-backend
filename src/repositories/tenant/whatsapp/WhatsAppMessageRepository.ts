@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, isNotNull, lt, or } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, lt, or, sql } from "drizzle-orm";
 import { db, type Database } from "../../../db/client.js";
 import {
   whatsappMessages,
@@ -140,6 +140,53 @@ export class WhatsAppMessageRepository {
       limit,
     });
     return items;
+  }
+
+  /**
+   * Busca textual dentro da conversa (tenant/conversation-scoped), por cursor.
+   * `bodyIlikePattern` já vem escapado e com `%...%` (o service escapa). Ordena
+   * DESC (match mais recente primeiro). Usa o índice
+   * `whatsapp_messages_tenant_conversation_created_idx`.
+   */
+  async searchByConversationId(
+    tenantId: string,
+    conversationId: string,
+    options: {
+      bodyIlikePattern: string;
+      limit: number;
+      cursor?: { createdAtMs: number; id: string } | null;
+    }
+  ): Promise<{ items: WhatsAppMessageRow[]; hasMore: boolean }> {
+    const { bodyIlikePattern, limit, cursor } = options;
+
+    const conditions = [
+      eq(whatsappMessages.tenantId, tenantId),
+      eq(whatsappMessages.conversationId, conversationId),
+      sql`${whatsappMessages.body} ILIKE ${bodyIlikePattern} ESCAPE '\\'`,
+    ];
+
+    if (cursor) {
+      const cursorDate = new Date(cursor.createdAtMs);
+      conditions.push(
+        or(
+          lt(whatsappMessages.createdAt, cursorDate),
+          and(
+            eq(whatsappMessages.createdAt, cursorDate),
+            lt(whatsappMessages.id, cursor.id)
+          )
+        )!
+      );
+    }
+
+    const rows = await this.database
+      .select()
+      .from(whatsappMessages)
+      .where(and(...conditions))
+      .orderBy(desc(whatsappMessages.createdAt), desc(whatsappMessages.id))
+      .limit(limit + 1);
+
+    const hasMore = rows.length > limit;
+    return { items: hasMore ? rows.slice(0, limit) : rows, hasMore };
   }
 
   async findLatestByConversationId(tenantId: string, conversationId: string) {

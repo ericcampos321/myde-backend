@@ -19,6 +19,12 @@ import {
   decodeMessageCursor,
   encodeMessageCursor,
 } from "./inboxMessageCursor.js";
+import {
+  buildBodyPreview,
+  clampSearchLimit,
+  escapeLikeSearchTerm,
+  MESSAGE_SEARCH,
+} from "./inboxMessageSearch.js";
 
 /** Quantidade de mensagens recentes usada como contexto da sugestão de IA. */
 const AI_HISTORY_FETCH_LIMIT = 30;
@@ -74,6 +80,22 @@ export interface InboxMessagePageDto {
   hasMore: boolean;
 }
 
+export interface InboxMessageSearchResultDto {
+  messageId: string;
+  conversationId: string;
+  bodyPreview: string;
+  direction: "inbound" | "outbound";
+  status: "pending" | InboxMessageStatus;
+  createdAt: string;
+  matchedText: string | null;
+}
+
+export interface InboxMessageSearchPageDto {
+  items: InboxMessageSearchResultDto[];
+  nextCursor: string | null;
+  hasMore: boolean;
+}
+
 export type InboxSuggestionDto = AiSuggestionResult;
 
 export interface InboxContactDto {
@@ -111,6 +133,7 @@ export interface InboxServiceDependencies {
     WhatsAppMessageRepository,
     | "findPageByConversationId"
     | "findRecentByConversationId"
+    | "searchByConversationId"
     | "findByConversationIds"
     | "findLatestByConversationId"
     | "findLatestInboundByConversationId"
@@ -323,6 +346,50 @@ export class InboxService {
     const nextCursor = hasMore && oldest ? encodeMessageCursor(oldest) : null;
 
     return { items: messages, nextCursor, hasMore };
+  }
+
+  async searchMessages(
+    conversationId: string,
+    options: { q?: string; limit?: unknown; cursor?: string } = {}
+  ): Promise<InboxMessageSearchPageDto> {
+    const tenant = await this.resolveCurrentTenant();
+    await this.assertConversationExists(tenant.id, conversationId);
+
+    const term = (options.q ?? "").trim().slice(0, MESSAGE_SEARCH.maxTermLength);
+
+    // Termo curto: resposta vazia, sem tocar o banco (UX fluida, sem 400).
+    if (term.length < MESSAGE_SEARCH.minTermLength) {
+      return { items: [], nextCursor: null, hasMore: false };
+    }
+
+    const limit = clampSearchLimit(options.limit);
+    const cursor = decodeMessageCursor(options.cursor);
+    const bodyIlikePattern = `%${escapeLikeSearchTerm(term)}%`;
+
+    const { items, hasMore } = await this.messageRepository.searchByConversationId(
+      tenant.id,
+      conversationId,
+      { bodyIlikePattern, limit, cursor }
+    );
+
+    const results = items.map((message): InboxMessageSearchResultDto => {
+      const { bodyPreview, matchedText } = buildBodyPreview(message.body, term);
+      return {
+        messageId: message.id,
+        conversationId: message.conversationId,
+        bodyPreview,
+        direction: message.direction,
+        status: normalizeConversationPreviewStatus(message.status),
+        createdAt: message.createdAt.toISOString(),
+        matchedText,
+      };
+    });
+
+    // items vêm DESC; o mais antigo é o último → cursor da próxima página.
+    const oldest = items[items.length - 1];
+    const nextCursor = hasMore && oldest ? encodeMessageCursor(oldest) : null;
+
+    return { items: results, nextCursor, hasMore };
   }
 
   async listContacts(searchTerm?: string): Promise<InboxContactDto[]> {

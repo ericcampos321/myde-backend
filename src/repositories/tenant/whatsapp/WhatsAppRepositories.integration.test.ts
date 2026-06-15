@@ -14,6 +14,11 @@ import { WhatsAppConversationRepository } from "./index.js";
 import { WhatsAppMessageRepository } from "./index.js";
 import { WhatsAppTenantRepository } from "./index.js";
 import { InboxRecentSearchRepository } from "./index.js";
+import { escapeLikeSearchTerm } from "../../../services/api/inbox/inboxMessageSearch.js";
+
+function ilikePattern(term: string): string {
+  return `%${escapeLikeSearchTerm(term)}%`;
+}
 
 const runDatabaseTests = process.env.RUN_DB_TESTS === "true";
 const describeDatabase = runDatabaseTests ? describe : describe.skip;
@@ -448,5 +453,110 @@ describeDatabase("paginação de mensagens (findPageByConversationId)", () => {
 
     expect(page.items.every((m) => m.conversationId === conversation.id)).toBe(true);
     expect(page.items.map((m) => m.body)).toEqual(["msg-0", "msg-1"]);
+  });
+});
+
+describeDatabase("busca de mensagens (searchByConversationId)", () => {
+  async function seed() {
+    const { tenant, conversation } = await createConversation();
+    const base = Date.UTC(2026, 5, 12, 10, 0, 0);
+    const bodies = [
+      "Fala Eric",        // i=0 (mais antiga)
+      "Suave Eric",       // i=1
+      "Plano 100% fibra", // i=2
+      "Total 1000 reais", // i=3
+    ];
+    for (let i = 0; i < bodies.length; i += 1) {
+      await messageRepository.createInbound({
+        tenantId: tenant.id,
+        conversationId: conversation.id,
+        body: bodies[i]!,
+        externalMessageId: `${marker}-search-${conversation.id}-${i}`,
+        createdAt: new Date(base + i * 60_000),
+      });
+    }
+    return { tenant, conversation };
+  }
+
+  it("ILIKE encontra mensagens da conversa (DESC, case-insensitive)", async () => {
+    const { tenant, conversation } = await seed();
+
+    const page = await messageRepository.searchByConversationId(
+      tenant.id,
+      conversation.id,
+      { bodyIlikePattern: ilikePattern("eric"), limit: 20 }
+    );
+
+    // 2 matches; mais recente primeiro (Suave Eric antes de Fala Eric).
+    expect(page.hasMore).toBe(false);
+    expect(page.items.map((m) => m.body)).toEqual(["Suave Eric", "Fala Eric"]);
+  });
+
+  it("escapa %: '100%' casa literal e não vira wildcard", async () => {
+    const { tenant, conversation } = await seed();
+
+    const page = await messageRepository.searchByConversationId(
+      tenant.id,
+      conversation.id,
+      { bodyIlikePattern: ilikePattern("100%"), limit: 20 }
+    );
+
+    // Só "Plano 100% fibra"; "Total 1000 reais" NÃO casa (% é literal).
+    expect(page.items.map((m) => m.body)).toEqual(["Plano 100% fibra"]);
+  });
+
+  it("cursor pagina resultados antigos sem duplicar", async () => {
+    const { tenant, conversation } = await seed();
+
+    const p1 = await messageRepository.searchByConversationId(
+      tenant.id,
+      conversation.id,
+      { bodyIlikePattern: ilikePattern("eric"), limit: 1 }
+    );
+    expect(p1.hasMore).toBe(true);
+    expect(p1.items.map((m) => m.body)).toEqual(["Suave Eric"]);
+
+    const last = p1.items[0]!;
+    const p2 = await messageRepository.searchByConversationId(
+      tenant.id,
+      conversation.id,
+      {
+        bodyIlikePattern: ilikePattern("eric"),
+        limit: 1,
+        cursor: { createdAtMs: last.createdAt.getTime(), id: last.id },
+      }
+    );
+    expect(p2.items.map((m) => m.body)).toEqual(["Fala Eric"]);
+    expect(p2.items.some((m) => m.id === last.id)).toBe(false);
+  });
+
+  it("é tenant+conversation-scoped (não vaza outra conversa)", async () => {
+    const { tenant, conversation } = await seed();
+    const otherContact = await contactRepository.upsertByPhone({
+      tenantId: tenant.id,
+      phone: "5511966665555",
+      name: "Outro",
+    });
+    const otherConversation = await conversationRepository.upsertOpenByContact({
+      tenantId: tenant.id,
+      contactId: otherContact!.id,
+      lastMessageAt: new Date(),
+    });
+    await messageRepository.createInbound({
+      tenantId: tenant.id,
+      conversationId: otherConversation!.id,
+      body: "Eric em outra conversa",
+      externalMessageId: `${marker}-search-other`,
+      createdAt: new Date(),
+    });
+
+    const page = await messageRepository.searchByConversationId(
+      tenant.id,
+      conversation.id,
+      { bodyIlikePattern: ilikePattern("eric"), limit: 20 }
+    );
+
+    expect(page.items.every((m) => m.conversationId === conversation.id)).toBe(true);
+    expect(page.items.map((m) => m.body)).toEqual(["Suave Eric", "Fala Eric"]);
   });
 });

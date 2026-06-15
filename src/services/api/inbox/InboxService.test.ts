@@ -1208,3 +1208,174 @@ describe("InboxService.listMessagesPage", () => {
     });
   });
 });
+
+describe("InboxService.searchMessages", () => {
+  const tenant = {
+    id: "tenant-1",
+    name: "NeoFibra",
+    phoneNumberId: "123456789012345",
+    wabaId: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
+  const conversation = {
+    id: "conv-1",
+    tenantId: tenant.id,
+    contactId: "contact-1",
+    status: "open",
+    lastMessageAt: new Date(),
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
+
+  function buildService(searchByConversationId: ReturnType<typeof vi.fn>) {
+    return new InboxService({
+      tenantRepository: { findByPhoneNumberId: vi.fn().mockResolvedValue(tenant) },
+      conversationRepository: {
+        listByTenant: vi.fn(),
+        findByContactId: vi.fn(),
+        findById: vi.fn().mockResolvedValue(conversation),
+      },
+      contactRepository: { findById: vi.fn(), findByIds: vi.fn(), listByTenant: vi.fn() },
+      messageRepository: {
+        findPageByConversationId: vi.fn(),
+        findRecentByConversationId: vi.fn(),
+        searchByConversationId,
+        findByConversationIds: vi.fn(),
+        findLatestByConversationId: vi.fn(),
+        findLatestInboundByConversationId: vi.fn(),
+      },
+      readStateRepository: {
+        findByConversationId: vi.fn(),
+        findByConversationIds: vi.fn(),
+        upsert: vi.fn(),
+      },
+      operatorIdentityResolver: { getCurrentOperatorId: () => "operator-1" },
+      aiSuggestionService: { suggest: vi.fn() },
+    });
+  }
+
+  const baseRow = {
+    tenantId: tenant.id,
+    conversationId: "conv-1",
+    direction: "inbound" as const,
+    status: "received",
+    updatedAt: new Date(),
+  };
+
+  it("q com menos de 2 chars → vazio SEM tocar o repositório", async () => {
+    const search = vi.fn();
+    const service = buildService(search);
+
+    await expect(service.searchMessages("conv-1", { q: "e" })).resolves.toEqual({
+      items: [],
+      nextCursor: null,
+      hasMore: false,
+    });
+    await expect(service.searchMessages("conv-1", { q: "  " })).resolves.toEqual({
+      items: [],
+      nextCursor: null,
+      hasMore: false,
+    });
+    expect(search).not.toHaveBeenCalled();
+  });
+
+  it("escapa o termo, clampa o limit e repassa scoping", async () => {
+    const search = vi.fn().mockResolvedValue({ items: [], hasMore: false });
+    const service = buildService(search);
+
+    await service.searchMessages("conv-1", { q: "100%", limit: 999 });
+
+    expect(search).toHaveBeenCalledWith("tenant-1", "conv-1", {
+      bodyIlikePattern: "%100\\%%",
+      limit: 50,
+      cursor: null,
+    });
+  });
+
+  it("mapeia DTO e monta nextCursor a partir do último item (DESC) quando hasMore", async () => {
+    const newest = {
+      ...baseRow,
+      id: "22222222-2222-2222-2222-222222222222",
+      body: "Suave Eric tudo bem",
+      direction: "outbound" as const,
+      status: "read",
+      createdAt: new Date("2026-06-12T10:05:00.000Z"),
+    };
+    const oldest = {
+      ...baseRow,
+      id: "11111111-1111-1111-1111-111111111111",
+      body: "fala Eric",
+      createdAt: new Date("2026-06-12T10:00:00.000Z"),
+    };
+    const search = vi
+      .fn()
+      .mockResolvedValue({ items: [newest, oldest], hasMore: true });
+    const service = buildService(search);
+
+    const page = await service.searchMessages("conv-1", { q: "er", limit: 2 });
+
+    expect(page.hasMore).toBe(true);
+    expect(page.items.map((i) => i.messageId)).toEqual([newest.id, oldest.id]);
+    expect(page.items[0]).toMatchObject({
+      messageId: newest.id,
+      conversationId: "conv-1",
+      direction: "outbound",
+      status: "read",
+      matchedText: "Er",
+    });
+    // cursor = último item da página DESC (o mais antigo).
+    expect(decodeMessageCursor(page.nextCursor)).toEqual({
+      createdAtMs: oldest.createdAt.getTime(),
+      id: oldest.id,
+    });
+  });
+
+  it("decodifica o cursor recebido e repassa ao repositório", async () => {
+    const search = vi.fn().mockResolvedValue({ items: [], hasMore: false });
+    const service = buildService(search);
+    const cursor = Buffer.from("1000_id-9").toString("base64");
+
+    await service.searchMessages("conv-1", { q: "eric", cursor });
+
+    expect(search).toHaveBeenCalledWith("tenant-1", "conv-1", {
+      bodyIlikePattern: "%eric%",
+      limit: 20,
+      cursor: { createdAtMs: 1000, id: "id-9" },
+    });
+  });
+
+  it("conversa inexistente → CONVERSATION_NOT_FOUND", async () => {
+    const service = new InboxService({
+      tenantRepository: { findByPhoneNumberId: vi.fn().mockResolvedValue(tenant) },
+      conversationRepository: {
+        listByTenant: vi.fn(),
+        findByContactId: vi.fn(),
+        findById: vi.fn().mockResolvedValue(null),
+      },
+      contactRepository: { findById: vi.fn(), findByIds: vi.fn(), listByTenant: vi.fn() },
+      messageRepository: {
+        findPageByConversationId: vi.fn(),
+        findRecentByConversationId: vi.fn(),
+        searchByConversationId: vi.fn(),
+        findByConversationIds: vi.fn(),
+        findLatestByConversationId: vi.fn(),
+        findLatestInboundByConversationId: vi.fn(),
+      },
+      readStateRepository: {
+        findByConversationId: vi.fn(),
+        findByConversationIds: vi.fn(),
+        upsert: vi.fn(),
+      },
+      operatorIdentityResolver: { getCurrentOperatorId: () => "operator-1" },
+      aiSuggestionService: { suggest: vi.fn() },
+    });
+
+    await expect(
+      service.searchMessages("conv-404", { q: "eric" })
+    ).rejects.toMatchObject<AppError>({
+      code: "CONVERSATION_NOT_FOUND",
+      statusCode: 404,
+    });
+  });
+});

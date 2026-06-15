@@ -48,6 +48,21 @@ const inboxService = {
     nextCursor: null,
     hasMore: false,
   }),
+  searchMessages: vi.fn().mockResolvedValue({
+    items: [
+      {
+        messageId: "msg-1",
+        conversationId: "conv-1",
+        bodyPreview: "Oi, preciso de ajuda",
+        direction: "inbound",
+        status: "sent",
+        createdAt: "2026-06-12T12:00:00.000Z",
+        matchedText: "aju",
+      },
+    ],
+    nextCursor: null,
+    hasMore: false,
+  }),
   markConversationAsRead: vi.fn().mockResolvedValue(undefined),
   listRecentSearches: vi.fn().mockResolvedValue([]),
   saveRecentSearch: vi.fn().mockResolvedValue(undefined),
@@ -199,6 +214,27 @@ describe("GET /conversations/:id/messages", () => {
     expect(inboxService.listMessagesPage).toHaveBeenCalledWith("conv-1", {
       limit: 10,
       before: "abc123",
+    });
+  });
+});
+
+describe("GET /conversations/:id/messages/search", () => {
+  it("repassa q/limit/cursor e retorna o envelope paginado", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: "/conversations/conv-1/messages/search?q=aju&limit=20&cursor=abc",
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(inboxService.searchMessages).toHaveBeenCalledWith("conv-1", {
+      q: "aju",
+      limit: 20,
+      cursor: "abc",
+    });
+    expect(res.json()).toMatchObject({
+      items: [{ messageId: "msg-1", matchedText: "aju" }],
+      nextCursor: null,
+      hasMore: false,
     });
   });
 });
