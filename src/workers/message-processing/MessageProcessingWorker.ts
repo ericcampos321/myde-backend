@@ -12,6 +12,7 @@ import {
   WORKER_STALLED_INTERVAL_MS,
 } from "../../config/defaults/worker-defaults.js";
 import { autoReplyEnabled } from "../../config/env.js";
+import { LogEvents } from "../../shared/logger/events.js";
 import { getRedisConnectionOptions } from "../../infrastructure/index.js";
 import { closeDb } from "../../db/client.js";
 import { createLogger } from "../../shared/logger/logger.js";
@@ -35,6 +36,12 @@ export interface MessageProcessingWorkerDependencies
   concurrency?: number;
   autorun?: boolean;
   processor?: Pick<MessageProcessingProcessor, "processMessageJob">;
+  /**
+   * Override do nome da fila — APENAS para isolar testes de integração (Redis),
+   * evitando competir com o worker de dev/produção. Sem valor → fila real
+   * (MESSAGE_PROCESSING_QUEUE), comportamento de produção inalterado.
+   */
+  queueName?: string;
 }
 
 
@@ -47,16 +54,19 @@ export async function createMessageProcessingWorker(
 }> {
   const processor =
     dependencies.processor ?? createMessageProcessingProcessor(dependencies);
-  const log = createLogger({ module: "worker", queue: MESSAGE_PROCESSING_QUEUE });
+  const queueName = dependencies.queueName ?? MESSAGE_PROCESSING_QUEUE;
+  const log = createLogger({ module: "worker", queue: queueName });
   const connection = getRedisConnectionOptions();
   const worker = new Worker<
     MessageProcessingJobPayload,
     MessageProcessingResult
   >(
-    MESSAGE_PROCESSING_QUEUE,
+    queueName,
     async (job) => {
       log.info(
         {
+          event: LogEvents.messageProcessing.started,
+          correlationId: job.id ?? job.data.externalMessageId,
           jobId: job.id,
           tenantId: job.data.tenantId,
           conversationId: job.data.conversationId,
@@ -79,11 +89,13 @@ export async function createMessageProcessingWorker(
     }
   );
 
-  const queueEvents = new QueueEvents(MESSAGE_PROCESSING_QUEUE, { connection });
+  const queueEvents = new QueueEvents(queueName, { connection });
 
   worker.on("completed", (job: Job<MessageProcessingJobPayload>, result) => {
     log.info(
       {
+        event: LogEvents.messageProcessing.completed,
+        correlationId: job.id ?? job.data.externalMessageId,
         jobId: job.id,
         tenantId: job.data.tenantId,
         conversationId: job.data.conversationId,
@@ -93,6 +105,7 @@ export async function createMessageProcessingWorker(
         aiSource: result.aiSource,
         skipped: result.skipped,
         reason: result.reason,
+        durationMs: jobDurationMs(job),
       },
       "worker job completed"
     );
@@ -101,6 +114,8 @@ export async function createMessageProcessingWorker(
   worker.on("failed", (job, error) => {
     log.error(
       {
+        event: LogEvents.messageProcessing.failed,
+        correlationId: job?.id ?? job?.data.externalMessageId,
         err: error,
         jobId: job?.id,
         tenantId: job?.data.tenantId,
@@ -108,17 +123,18 @@ export async function createMessageProcessingWorker(
         messageId: job?.data.messageId,
         externalMessageId: job?.data.externalMessageId,
         attemptsMade: job?.attemptsMade,
+        durationMs: job ? jobDurationMs(job) : undefined,
       },
       "worker job failed"
     );
   });
 
   worker.on("error", (error) => {
-    log.error({ err: error }, "worker error");
+    log.error({ event: LogEvents.messageProcessing.failed, err: error }, "worker error");
   });
 
   queueEvents.on("stalled", ({ jobId }) => {
-    log.warn({ jobId }, "worker job stalled");
+    log.warn({ event: LogEvents.messageProcessing.stalled, jobId, correlationId: jobId }, "worker job stalled");
   });
 
   const close = async (): Promise<void> => {
@@ -127,6 +143,14 @@ export async function createMessageProcessingWorker(
   };
 
   return { worker, queueEvents, close };
+}
+
+/** Duração do processamento do job (ms) a partir dos timestamps do BullMQ. */
+function jobDurationMs(job: Job<MessageProcessingJobPayload>): number | undefined {
+  if (typeof job.processedOn === "number" && typeof job.finishedOn === "number") {
+    return job.finishedOn - job.processedOn;
+  }
+  return undefined;
 }
 
 async function bootstrap(): Promise<void> {

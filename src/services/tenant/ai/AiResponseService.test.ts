@@ -45,7 +45,10 @@ describe("AiResponseService", () => {
       } satisfies AiProvider,
       knowledgeBaseService: {
         getContext: vi.fn().mockResolvedValue("kb context"),
-        loadDocuments: vi.fn(),
+        loadDocuments: vi.fn().mockResolvedValue([
+          { name: "a.md", path: "a", content: "x" },
+          { name: "b.md", path: "b", content: "y" },
+        ]),
       },
       historyLimit: 10,
       systemPrompt: "system prompt",
@@ -59,7 +62,13 @@ describe("AiResponseService", () => {
       ],
     });
 
-    expect(result).toEqual({ source: "stub", text: "ok" });
+    // grounding: 2 documentos, contexto "kb context" (10 chars)
+    expect(result).toEqual({
+      source: "stub",
+      text: "ok",
+      contextItemsCount: 2,
+      contextChars: "kb context".length,
+    });
     expect(generateReply).toHaveBeenCalledWith({
       systemPrompt: "system prompt",
       knowledgeBaseContext: "kb context",
@@ -84,7 +93,7 @@ describe("AiResponseService", () => {
       } satisfies AiProvider,
       knowledgeBaseService: {
         getContext: vi.fn().mockResolvedValue("kb context"),
-        loadDocuments: vi.fn(),
+        loadDocuments: vi.fn().mockResolvedValue([]),
       },
       historyLimit: 2,
       systemPrompt: "system prompt",

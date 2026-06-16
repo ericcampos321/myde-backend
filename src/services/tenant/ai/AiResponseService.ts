@@ -39,13 +39,22 @@ export class AiResponseService {
 
   async generateResponse(input: AiResponseInput): Promise<AiResponseResult> {
     const knowledgeBaseContext = await this.dependencies.knowledgeBaseService.getContext();
+    // Métricas de grounding (RAG): quantos documentos e quanto contexto foram
+    // usados. `loadDocuments` é cacheado pelo KnowledgeBaseService.
+    const documents = await this.dependencies.knowledgeBaseService.loadDocuments();
 
-    return this.dependencies.provider.generateReply({
+    const result = await this.dependencies.provider.generateReply({
       systemPrompt: this.systemPrompt,
       knowledgeBaseContext,
       conversationHistory: limitConversationHistory(input.conversationHistory, this.historyLimit),
       userMessage: input.currentMessage,
     });
+
+    return {
+      ...result,
+      contextItemsCount: documents.length,
+      contextChars: knowledgeBaseContext.length,
+    };
   }
 }
 

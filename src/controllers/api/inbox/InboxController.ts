@@ -30,6 +30,20 @@ interface RecentSearchBody {
   targetId: string;
 }
 
+interface AiUsageQuerystring {
+  from?: string;
+  to?: string;
+  conversationId?: string;
+  limit?: number;
+  cursor?: string;
+  model?: string;
+  source?: string;
+  provider?: string;
+  riskLevel?: string;
+  blocked?: boolean | string;
+  stage?: string;
+}
+
 export interface InboxControllerOptions extends FastifyPluginOptions {
   inboxService?: Pick<
     InboxService,
@@ -39,6 +53,7 @@ export interface InboxControllerOptions extends FastifyPluginOptions {
     | "searchMessages"
     | "listContacts"
     | "suggestReply"
+    | "getAiUsage"
     | "markConversationAsRead"
     | "listRecentSearches"
     | "saveRecentSearch"
@@ -210,6 +225,48 @@ export async function inboxController(
     },
     async (request) => {
       return inboxService.suggestReply(request.body.conversationId);
+    }
+  );
+
+  app.get<{ Querystring: AiUsageQuerystring }>(
+    "/ai/usage",
+    {
+      schema: {
+        querystring: {
+          type: "object",
+          properties: {
+            from: { type: "string" },
+            to: { type: "string" },
+            conversationId: { type: "string", minLength: 1 },
+            limit: { type: "integer", minimum: 1, maximum: 100 },
+            cursor: { type: "string", minLength: 1 },
+            model: { type: "string", minLength: 1 },
+            source: { type: "string", enum: ["openai", "stub"] },
+            provider: { type: "string", minLength: 1 },
+            riskLevel: { type: "string", enum: ["low", "medium", "high"] },
+            blocked: { anyOf: [{ type: "boolean" }, { type: "string" }] },
+            stage: {
+              type: "string",
+              enum: ["input", "output", "recurring", "auto_reply"],
+            },
+          },
+        },
+      },
+    },
+    async (request) => {
+      return inboxService.getAiUsage({
+        from: request.query.from,
+        to: request.query.to,
+        conversationId: request.query.conversationId,
+        limit: request.query.limit,
+        cursor: request.query.cursor,
+        model: request.query.model,
+        source: request.query.source,
+        provider: request.query.provider,
+        riskLevel: request.query.riskLevel,
+        blocked: request.query.blocked,
+        stage: request.query.stage,
+      });
     }
   );
 }

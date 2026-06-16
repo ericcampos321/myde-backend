@@ -91,7 +91,18 @@ export class OpenAiProvider implements AiProvider {
       });
     }
 
-    return { source: this.source, text };
+    // Usage de tokens (controle de custo). Null quando a API não retorna usage —
+    // não quebra o fluxo. Nunca logamos/retornamos conteúdo, só contagens.
+    const usage = completion.usage
+      ? {
+          promptTokens: completion.usage.prompt_tokens ?? null,
+          cachedPromptTokens: getCachedPromptTokens(completion.usage),
+          completionTokens: completion.usage.completion_tokens ?? null,
+          totalTokens: completion.usage.total_tokens ?? null,
+        }
+      : null;
+
+    return { source: this.source, text, model: this.model, usage };
   }
 
   /**
@@ -127,6 +138,18 @@ export class OpenAiProvider implements AiProvider {
       statusCode: 502,
     });
   }
+}
+
+function getCachedPromptTokens(
+  usage: NonNullable<OpenAI.Chat.ChatCompletion["usage"]>
+): number | null {
+  const promptTokensDetails = usage.prompt_tokens_details as
+    | { cached_tokens?: unknown }
+    | undefined;
+  const cachedTokens = promptTokensDetails?.cached_tokens;
+  return typeof cachedTokens === "number" && Number.isFinite(cachedTokens)
+    ? cachedTokens
+    : null;
 }
 
 function buildOpenAiSystemMessage(input: AiProviderInput): string {

@@ -1,6 +1,7 @@
 import { env, autoReplyEnabled } from "../../config/env.js";
 import { AppError } from "../../errors/AppError.js";
 import { createLogger } from "../../shared/logger/logger.js";
+import { LogEvents } from "../../shared/logger/events.js";
 import { maskPhone } from "../../shared/utils/phone.js";
 import type { SendTextParams, SendTextResult } from "./MetaWhatsAppTypes.js";
 
@@ -122,9 +123,11 @@ export class MetaGraphApiClient {
 
     const baseUrlHost = hostOf(this.apiBaseUrl);
     const metaMode = metaModeOf(this.apiBaseUrl);
+    const startedAt = Date.now();
 
     log.info(
       {
+        event: LogEvents.meta.outboundStarted,
         metaMode,
         baseUrlHost,
         phoneNumberId: params.phoneNumberId,
@@ -165,6 +168,7 @@ export class MetaGraphApiClient {
         const metaError = (data as MetaGraphApiErrorResponse).error;
         log.error(
           {
+            event: LogEvents.meta.outboundFailed,
             metaMode,
             baseUrlHost,
             phoneNumberId: params.phoneNumberId,
@@ -175,6 +179,7 @@ export class MetaGraphApiClient {
             errorSubcode: metaError?.error_subcode,
             fbtraceId: metaError?.fbtrace_id,
             errorMessage: errorMsg,
+            durationMs: Date.now() - startedAt,
           },
           "[meta] send message failed"
         );
@@ -207,12 +212,14 @@ export class MetaGraphApiClient {
 
       log.info(
         {
+          event: LogEvents.meta.outboundCompleted,
           metaMode,
           baseUrlHost,
           phoneNumberId: params.phoneNumberId,
           to: maskPhone(params.to),
           status: response.status,
           externalMessageId,
+          durationMs: Date.now() - startedAt,
         },
         "[meta] message sent successfully"
       );
@@ -225,8 +232,10 @@ export class MetaGraphApiClient {
 
       log.error(
         {
+          event: LogEvents.meta.outboundFailed,
           to: maskPhone(params.to),
           error: error instanceof Error ? error.message : "unknown",
+          durationMs: Date.now() - startedAt,
         },
         "[meta] unexpected error sending message"
       );

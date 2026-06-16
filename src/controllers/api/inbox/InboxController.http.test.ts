@@ -75,6 +75,52 @@ const inboxService = {
     riskReasons: [],
     userMessage: null,
   }),
+  getAiUsage: vi.fn().mockResolvedValue({
+    summary: {
+      totalInteractions: 5,
+      completedInteractions: 4,
+      blockedInteractions: 1,
+      promptTokens: 1200,
+      completionTokens: 800,
+      totalTokens: 2000,
+      estimatedCost: 0.0008,
+      estimatedCostUsd: 0.0008,
+      avgDurationMs: 950,
+    },
+    byModel: [
+      {
+        model: "gpt-4o-mini",
+        interactions: 4,
+        totalTokens: 2000,
+        estimatedCost: 0.0008,
+        estimatedCostUsd: 0.0008,
+      },
+    ],
+    recent: {
+      items: [
+        {
+          id: "log-1",
+          createdAt: "2026-06-13T10:00:00.000Z",
+          conversationId: "conv-1",
+          stage: "auto_reply",
+          model: "gpt-4o-mini",
+          source: "openai",
+          provider: "openai",
+          riskLevel: "low",
+          blocked: false,
+          promptTokens: 300,
+          cachedPromptTokens: 0,
+          completionTokens: 200,
+          totalTokens: 500,
+          estimatedCost: 0.000225,
+          estimatedCostUsd: 0.000225,
+          durationMs: 900,
+        },
+      ],
+      nextCursor: null,
+      hasNextPage: false,
+    },
+  }),
 };
 
 beforeAll(async () => {
@@ -272,5 +318,50 @@ describe("POST /ai/suggest", () => {
       riskReasons: [],
       userMessage: null,
     });
+  });
+});
+
+describe("GET /ai/usage", () => {
+  it("repassa from/to/filtros/cursor/limit e retorna {summary,byModel,recent}", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: "/ai/usage?from=2026-06-07T00:00:00.000Z&to=2026-06-14T00:00:00.000Z&conversationId=conv-1&limit=10&cursor=abc&model=gpt-5.4&source=openai&provider=openai&riskLevel=low&blocked=false&stage=auto_reply",
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(inboxService.getAiUsage).toHaveBeenCalledWith({
+      from: "2026-06-07T00:00:00.000Z",
+      to: "2026-06-14T00:00:00.000Z",
+      conversationId: "conv-1",
+      limit: 10,
+      cursor: "abc",
+      model: "gpt-5.4",
+      source: "openai",
+      provider: "openai",
+      riskLevel: "low",
+      blocked: false,
+      stage: "auto_reply",
+    });
+
+    const body = res.json();
+    expect(body.summary).toMatchObject({
+      totalInteractions: 5,
+      blockedInteractions: 1,
+      totalTokens: 2000,
+      estimatedCost: 0.0008,
+      estimatedCostUsd: 0.0008,
+    });
+    expect(body.byModel[0]).toMatchObject({ model: "gpt-4o-mini" });
+  });
+
+  it("a resposta NÃO expõe prompt, mensagem crua ou token de API", async () => {
+    const res = await app.inject({ method: "GET", url: "/ai/usage" });
+    const raw = res.payload;
+    expect(raw).not.toMatch(/prompt"\s*:/i);
+    expect(raw).not.toMatch(/api[_-]?key/i);
+    expect(raw).not.toMatch(/authorization/i);
+    expect(raw).not.toMatch(/"body"\s*:/i);
+    // campos seguros do recent presentes
+    expect(res.json().recent.items[0]).toHaveProperty("totalTokens");
   });
 });

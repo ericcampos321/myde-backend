@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyPluginOptions } from "fastify";
 import { metaWebhookHeadersSchema, metaWebhookVerificationQuerySchema } from "../../../schemas/tenant/whatsapp/WhatsAppWebhookSchemas.js";
 import type { MetaWebhookHeaders, MetaWebhookVerificationQuery } from "../../../types/tenant/whatsapp/WhatsAppWebhookTypes.js";
 import { WhatsAppWebhookService } from "../../../services/tenant/whatsapp/WhatsAppWebhookService.js";
+import { LogEvents } from "../../../shared/logger/events.js";
 
 export interface WhatsAppWebhookControllerOptions extends FastifyPluginOptions {
   webhookService?: WhatsAppWebhookService;
@@ -31,11 +32,25 @@ export async function whatsAppWebhookController(app: FastifyInstance, options: W
       },
     },
     async (request) => {
-      return webhookService.receiveWebhook({
+      const startedAt = Date.now();
+      const ack = await webhookService.receiveWebhook({
         rawBody: request.rawBody,
         headers: request.headers,
         payload: request.body,
+        requestId: String(request.id),
       });
+
+      request.log.info(
+        {
+          event: LogEvents.webhook.received,
+          requestId: request.id,
+          received: ack.received,
+          durationMs: Date.now() - startedAt,
+        },
+        "webhook POST handled"
+      );
+
+      return ack;
     }
   );
 }

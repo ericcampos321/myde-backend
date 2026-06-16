@@ -233,7 +233,7 @@ describeDatabase("POST /webhook com persistencia", () => {
     expect(enqueuedJobs).toHaveLength(1);
   });
 
-  it("nao duplica mensagem e retorna duplicated true", async () => {
+  it("nao duplica mensagem e re-enfileira o job de forma idempotente (A-03)", async () => {
     const messageId = `${marker}-wamid-duplicate`;
     const body = payload({ messageId });
     enqueuedJobs.length = 0;
@@ -247,7 +247,13 @@ describeDatabase("POST /webhook com persistencia", () => {
       persisted: false,
       duplicated: true,
     });
-    expect(enqueuedJobs).toHaveLength(1);
+
+    // A-03: o duplicado NÃO cria nova mensagem, mas REPARA o job com o mesmo
+    // jobId=externalMessageId (idempotente). O fake enfileira nas duas entregas;
+    // no BullMQ real, o mesmo jobId não duplicaria o job.
+    expect(enqueuedJobs).toHaveLength(2);
+    expect(enqueuedJobs[1]).toEqual(enqueuedJobs[0]);
+    expect(enqueuedJobs[1]?.externalMessageId).toBe(messageId);
 
     const rows = await database
       .select()

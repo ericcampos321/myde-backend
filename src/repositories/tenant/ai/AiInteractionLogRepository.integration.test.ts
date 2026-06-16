@@ -173,4 +173,183 @@ describeDatabase("AiInteractionLogRepository com PostgreSQL", () => {
       })
     ).resolves.toBe(1);
   });
+
+  it("agrega uso (summary/byModel) tenant-scoped, somando tokens com null=0", async () => {
+    const a = await createConversation();
+    const other = await createConversation();
+    const from = new Date(Date.now() - 60_000);
+    const to = new Date(Date.now() + 60_000);
+
+    // 2 logs completed (com tokens) + 1 blocked (sem tokens) no tenant A.
+    await interactionLogRepository.create({
+      tenantId: a.tenant.id,
+      conversationId: a.conversation.id,
+      contactId: a.contact.id,
+      stage: "input",
+      action: "allow",
+      riskLevel: "low",
+      riskReasons: [],
+      matchedRules: [],
+      blocked: false,
+      source: "openai",
+      provider: "openai",
+      promptVersion: "v1",
+      inputCharCount: 10,
+      outputCharCount: 20,
+      model: "gpt-4o-mini",
+      promptTokens: 100,
+      cachedPromptTokens: 10,
+      completionTokens: 50,
+      totalTokens: 150,
+      durationMs: 800,
+      contextItemsCount: 3,
+      contextChars: 1200,
+    });
+    await interactionLogRepository.create({
+      tenantId: a.tenant.id,
+      conversationId: a.conversation.id,
+      contactId: a.contact.id,
+      stage: "input",
+      action: "allow",
+      riskLevel: "low",
+      riskReasons: [],
+      matchedRules: [],
+      blocked: false,
+      source: "openai",
+      provider: "openai",
+      promptVersion: "v1",
+      inputCharCount: 10,
+      outputCharCount: 20,
+      model: "gpt-4o-mini",
+      promptTokens: 200,
+      cachedPromptTokens: 20,
+      completionTokens: 100,
+      totalTokens: 300,
+      durationMs: 1200,
+    });
+    await interactionLogRepository.create({
+      tenantId: a.tenant.id,
+      conversationId: a.conversation.id,
+      contactId: a.contact.id,
+      stage: "input",
+      action: "block",
+      riskLevel: "high",
+      riskReasons: ["policy_bypass"],
+      matchedRules: ["policy.bypass"],
+      blocked: true,
+      source: null,
+      inputCharCount: 5,
+      outputCharCount: null,
+      model: null,
+    });
+    // Log de OUTRO tenant — não deve entrar.
+    await interactionLogRepository.create({
+      tenantId: other.tenant.id,
+      conversationId: other.conversation.id,
+      contactId: other.contact.id,
+      stage: "input",
+      action: "allow",
+      riskLevel: "low",
+      riskReasons: [],
+      matchedRules: [],
+      blocked: false,
+      source: "openai",
+      model: "gpt-4o-mini",
+      inputCharCount: 1,
+      outputCharCount: 1,
+      promptTokens: 9999,
+      cachedPromptTokens: 9999,
+      completionTokens: 9999,
+      totalTokens: 9999,
+    });
+
+    const filter = { tenantId: a.tenant.id, from, to };
+
+    const summary = await interactionLogRepository.getUsageSummary(filter);
+    expect(summary.totalInteractions).toBe(3);
+    expect(summary.blockedInteractions).toBe(1);
+    expect(summary.promptTokens).toBe(300);
+    expect(summary.cachedPromptTokens).toBe(30);
+    expect(summary.completionTokens).toBe(150);
+    expect(summary.totalTokens).toBe(450);
+    expect(summary.avgDurationMs).toBe(1000); // (800+1200)/2
+
+    const byModel = await interactionLogRepository.getUsageByModel(filter);
+    const mini = byModel.find((m) => m.model === "gpt-4o-mini");
+    expect(mini?.interactions).toBe(2);
+    expect(mini?.cachedPromptTokens).toBe(30);
+    expect(mini?.totalTokens).toBe(450);
+
+    const recent = await interactionLogRepository.listRecentUsage(filter, 10);
+    expect(recent.items.length).toBe(3);
+    // não vaza outro tenant
+    expect(recent.items.every((r) => r.conversationId === a.conversation.id)).toBe(
+      true
+    );
+    // campos seguros apenas
+    expect(Object.keys(recent.items[0]!).sort()).toEqual(
+      [
+        "blocked",
+        "cachedPromptTokens",
+        "completionTokens",
+        "conversationId",
+        "createdAt",
+        "durationMs",
+        "id",
+        "model",
+        "promptTokens",
+        "provider",
+        "riskLevel",
+        "source",
+        "stage",
+        "totalTokens",
+      ].sort()
+    );
+    expect(recent.hasNextPage).toBe(false);
+  });
+
+  it("conta logs de auto-reply do worker (stage auto_reply) nos agregados", async () => {
+    const a = await createConversation();
+    const from = new Date(Date.now() - 60_000);
+    const to = new Date(Date.now() + 60_000);
+
+    await interactionLogRepository.create({
+      tenantId: a.tenant.id,
+      conversationId: a.conversation.id,
+      contactId: a.contact.id,
+      stage: "auto_reply",
+      action: "allow",
+      riskLevel: "low",
+      riskReasons: [],
+      matchedRules: [],
+      blocked: false,
+      source: "openai",
+      provider: "openai",
+      promptVersion: null,
+      inputCharCount: 12,
+      outputCharCount: 40,
+      model: "gpt-4o-mini",
+      promptTokens: 120,
+      completionTokens: 30,
+      totalTokens: 150,
+      durationMs: 950,
+      contextItemsCount: 3,
+      contextChars: 2048,
+    });
+
+    const filter = { tenantId: a.tenant.id, from, to };
+
+    const summary = await interactionLogRepository.getUsageSummary(filter);
+    expect(summary.totalInteractions).toBe(1);
+    expect(summary.blockedInteractions).toBe(0);
+    expect(summary.totalTokens).toBe(150);
+    expect(summary.avgDurationMs).toBe(950);
+
+    const recent = await interactionLogRepository.listRecentUsage(filter, 10);
+    expect(recent.items.length).toBe(1);
+    expect(recent.items[0]!.stage).toBe("auto_reply");
+    // O contrato seguro NÃO expõe action/reasons — só metadados seguros.
+    expect(Object.keys(recent.items[0]!)).not.toContain("action");
+    expect(Object.keys(recent.items[0]!)).not.toContain("riskReasons");
+  });
 });

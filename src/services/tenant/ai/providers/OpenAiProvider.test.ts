@@ -77,6 +77,44 @@ describe("OpenAiProvider.generateReply", () => {
     expect(systemMessage).toMatch(/não invente/i);
   });
 
+  it("captura usage (tokens) e model quando a OpenAI retorna usage", async () => {
+    const create = vi.fn().mockResolvedValue({
+      ...okResponse(),
+      usage: {
+        prompt_tokens: 120,
+        prompt_tokens_details: { cached_tokens: 30 },
+        completion_tokens: 40,
+        total_tokens: 160,
+      },
+    });
+    const provider = new OpenAiProvider({
+      client: fakeClient(create),
+      model: "gpt-4o-mini",
+    });
+
+    const result = await provider.generateReply(input);
+
+    expect(result.model).toBe("gpt-4o-mini");
+    expect(result.usage).toEqual({
+      promptTokens: 120,
+      cachedPromptTokens: 30,
+      completionTokens: 40,
+      totalTokens: 160,
+    });
+  });
+
+  it("usage = null quando a OpenAI não retorna usage (não quebra)", async () => {
+    const create = vi.fn().mockResolvedValue(okResponse());
+    const provider = new OpenAiProvider({
+      client: fakeClient(create),
+      model: "gpt-4o-mini",
+    });
+
+    const result = await provider.generateReply(input);
+    expect(result.usage).toBeNull();
+    expect(result.text).toBe("Temos o Fibra 300.");
+  });
+
   it("usa max_tokens + temperature para modelo legado (gpt-4o-mini)", async () => {
     const create = vi.fn().mockResolvedValue(okResponse());
     const provider = new OpenAiProvider({

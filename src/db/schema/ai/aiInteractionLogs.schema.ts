@@ -25,7 +25,7 @@ export const aiInteractionLogs = pgTable(
     contactId: uuid("contact_id"),
     operatorId: text("operator_id"),
     stage: text("stage", {
-      enum: ["input", "output", "recurring"],
+      enum: ["input", "output", "recurring", "auto_reply"],
     }).notNull(),
     action: text("action", {
       enum: ["allow", "flag", "block"],
@@ -45,10 +45,21 @@ export const aiInteractionLogs = pgTable(
     source: text("source", {
       enum: ["openai", "stub"],
     }),
+    provider: text("provider"),
     promptVersion: text("prompt_version"),
     inputCharCount: integer("input_char_count").notNull().default(0),
     outputCharCount: integer("output_char_count"),
     model: text("model"),
+    // Uso da LLM (controle de custo). Nullable: caminhos sem chamada à IA
+    // (ex.: bloqueio de input) e linhas antigas ficam null. Nunca guardamos
+    // prompt, mensagem ou resposta — apenas contagens/metadados seguros.
+    promptTokens: integer("prompt_tokens"),
+    cachedPromptTokens: integer("cached_prompt_tokens"),
+    completionTokens: integer("completion_tokens"),
+    totalTokens: integer("total_tokens"),
+    durationMs: integer("duration_ms"),
+    contextItemsCount: integer("context_items_count"),
+    contextChars: integer("context_chars"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -56,7 +67,7 @@ export const aiInteractionLogs = pgTable(
   (table) => [
     check(
       "ai_interaction_logs_stage_check",
-      sql`${table.stage} in ('input', 'output', 'recurring')`
+      sql`${table.stage} in ('input', 'output', 'recurring', 'auto_reply')`
     ),
     check(
       "ai_interaction_logs_action_check",
@@ -73,6 +84,10 @@ export const aiInteractionLogs = pgTable(
     check(
       "ai_interaction_logs_output_char_count_non_negative_check",
       sql`${table.outputCharCount} is null or ${table.outputCharCount} >= 0`
+    ),
+    check(
+      "ai_interaction_logs_cached_prompt_tokens_non_negative_check",
+      sql`${table.cachedPromptTokens} is null or ${table.cachedPromptTokens} >= 0`
     ),
     index("ai_interaction_logs_tenant_created_at_idx").on(
       table.tenantId,

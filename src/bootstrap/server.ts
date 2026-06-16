@@ -2,6 +2,7 @@ import { buildApp } from "./app.js";
 import { env } from "../config/env.js";
 import { logger } from "../shared/logger/logger.js";
 import { closeMessageProcessingQueue } from "../queues/message-processing/index.js";
+import { closeDb } from "../db/client.js";
 
 /** Bootstrap do processo HTTP da API. */
 async function start(): Promise<void> {
@@ -15,6 +16,9 @@ async function start(): Promise<void> {
     try {
       await closeMessageProcessingQueue();
       await app.close();
+      // Fecha o pool do Postgres por último: garante que requests em andamento
+      // (já encerrados por app.close()) não percam a conexão no meio.
+      await closeDb();
       logger.info("API encerrada com sucesso");
       process.exit(0);
     } catch (err) {

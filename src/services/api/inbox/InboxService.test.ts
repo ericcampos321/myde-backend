@@ -18,26 +18,16 @@ describe("InboxService.listConversations (banco vazio)", () => {
     updatedAt: new Date(),
   };
 
-  it("retorna [] quando não há conversas, sem tocar contatos/mensagens", async () => {
+  it("retorna [] quando não há conversas, com uma única query de resumo", async () => {
     const findByPhoneNumberId = vi.fn().mockResolvedValue(tenant);
-    const listByTenant = vi.fn().mockResolvedValue([]);
-    const findByIds = vi.fn();
-    const findByConversationIds = vi.fn();
+    const listConversationSummaries = vi.fn().mockResolvedValue([]);
 
     const service = new InboxService({
       tenantRepository: { findByPhoneNumberId },
-      conversationRepository: { listByTenant, findById: vi.fn() },
-      contactRepository: { findByIds },
-      messageRepository: {
-        findByConversationId: vi.fn(),
-        findByConversationIds,
-        findLatestByConversationId: vi.fn(),
-        findLatestInboundByConversationId: vi.fn(),
-      },
-      readStateRepository: {
-        findByConversationId: vi.fn(),
-        findByConversationIds: vi.fn(),
-        upsert: vi.fn(),
+      conversationRepository: {
+        listByTenant: vi.fn(),
+        findById: vi.fn(),
+        listConversationSummaries,
       },
       operatorIdentityResolver: {
         getCurrentOperatorId: () => "operator-1",
@@ -47,10 +37,8 @@ describe("InboxService.listConversations (banco vazio)", () => {
     const result = await service.listConversations();
 
     expect(result).toEqual([]);
-    expect(listByTenant).toHaveBeenCalledWith(tenant.id);
-    // Sem conversas: não consulta contatos nem mensagens (early return).
-    expect(findByIds).not.toHaveBeenCalled();
-    expect(findByConversationIds).not.toHaveBeenCalled();
+    // A-01: o preview/unread vêm de UMA query de resumo, escopada por tenant+operador.
+    expect(listConversationSummaries).toHaveBeenCalledWith(tenant.id, "operator-1");
   });
 });
 
@@ -151,103 +139,32 @@ describe("InboxService unread state", () => {
     updatedAt: new Date(),
   };
 
-  it("conta apenas inbound apos o lastReadAt do operador", async () => {
+  it("mapeia preview/unread/lastInbound do resumo (última inbound)", async () => {
     const findByPhoneNumberId = vi.fn().mockResolvedValue(tenant);
-    const listByTenant = vi.fn().mockResolvedValue([
+    const listConversationSummaries = vi.fn().mockResolvedValue([
       {
         id: "conv-1",
-        tenantId: tenant.id,
         contactId: "contact-1",
         status: "open",
-        lastMessageAt: new Date("2026-06-12T12:05:00.000Z"),
+        lastMessageAt: new Date("2026-06-12T12:00:00.000Z"),
         createdAt: new Date("2026-06-12T10:00:00.000Z"),
-        updatedAt: new Date("2026-06-12T12:05:00.000Z"),
-      },
-    ]);
-    const findByIds = vi.fn().mockResolvedValue([
-      {
-        id: "contact-1",
-        tenantId: tenant.id,
-        phone: "5511999999999",
-        name: "Maria",
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      },
-    ]);
-    const findByConversationIds = vi.fn().mockResolvedValue([
-      {
-        id: "msg-1",
-        tenantId: tenant.id,
-        conversationId: "conv-1",
-        direction: "inbound",
-        body: "Primeira inbound",
-        status: "received",
-        externalMessageId: null,
-        failureCode: null,
-        failureReason: null,
-        failedAt: null,
-        replyToMessageId: null,
-        createdAt: new Date("2026-06-12T10:10:00.000Z"),
-        updatedAt: new Date("2026-06-12T10:10:00.000Z"),
-      },
-      {
-        id: "msg-2",
-        tenantId: tenant.id,
-        conversationId: "conv-1",
-        direction: "outbound",
-        body: "Resposta",
-        status: "sent",
-        externalMessageId: null,
-        failureCode: null,
-        failureReason: null,
-        failedAt: null,
-        replyToMessageId: null,
-        createdAt: new Date("2026-06-12T11:00:00.000Z"),
-        updatedAt: new Date("2026-06-12T11:00:00.000Z"),
-      },
-      {
-        id: "msg-3",
-        tenantId: tenant.id,
-        conversationId: "conv-1",
-        direction: "inbound",
-        body: "Nova inbound",
-        status: "received",
-        externalMessageId: null,
-        failureCode: null,
-        failureReason: null,
-        failedAt: null,
-        replyToMessageId: null,
-        createdAt: new Date("2026-06-12T12:00:00.000Z"),
-        updatedAt: new Date("2026-06-12T12:00:00.000Z"),
-      },
-    ]);
-    const findByConversationIdsReadState = vi.fn().mockResolvedValue([
-      {
-        id: "state-1",
-        tenantId: tenant.id,
-        conversationId: "conv-1",
-        operatorId: "operator-1",
-        lastReadAt: new Date("2026-06-12T11:30:00.000Z"),
-        lastReadMessageId: "msg-2",
-        createdAt: new Date(),
-        updatedAt: new Date(),
+        contactName: "Maria",
+        contactPhone: "5511999999999",
+        lastMessageBody: "Nova inbound",
+        lastMessageDirection: "inbound",
+        lastMessageStatus: "received",
+        lastInboundMessageId: "msg-3",
+        lastInboundMessageAt: new Date("2026-06-12T12:00:00.000Z"),
+        unreadCount: 1,
       },
     ]);
 
     const service = new InboxService({
       tenantRepository: { findByPhoneNumberId },
-      conversationRepository: { listByTenant, findById: vi.fn() },
-      contactRepository: { findByIds, listByTenant: vi.fn() },
-      messageRepository: {
-        findByConversationId: vi.fn(),
-        findByConversationIds,
-        findLatestByConversationId: vi.fn(),
-        findLatestInboundByConversationId: vi.fn(),
-      },
-      readStateRepository: {
-        findByConversationId: vi.fn(),
-        findByConversationIds: findByConversationIdsReadState,
-        upsert: vi.fn(),
+      conversationRepository: {
+        listByTenant: vi.fn(),
+        findById: vi.fn(),
+        listConversationSummaries,
       },
       operatorIdentityResolver: {
         getCurrentOperatorId: () => "operator-1",
@@ -256,88 +173,45 @@ describe("InboxService unread state", () => {
 
     const result = await service.listConversations();
 
-    expect(findByConversationIdsReadState).toHaveBeenCalledWith(
-      tenant.id,
-      "operator-1",
-      ["conv-1"]
-    );
+    expect(listConversationSummaries).toHaveBeenCalledWith(tenant.id, "operator-1");
+    expect(result[0]?.contactName).toBe("Maria");
+    expect(result[0]?.contactPhone).toBe("5511999999999");
     expect(result[0]?.unread).toBe(1);
     expect(result[0]?.lastMessage).toBe("Nova inbound");
     expect(result[0]?.lastMessageDirection).toBe("inbound");
+    // Inbound: a prévia não expõe status de entrega.
     expect(result[0]?.lastMessageStatus).toBeNull();
+    expect(result[0]?.lastInboundMessageId).toBe("msg-3");
+    expect(result[0]?.lastInboundMessageAt).toBe("2026-06-12T12:00:00.000Z");
+    expect(result[0]?.lastMessageAt).toBe("2026-06-12T12:00:00.000Z");
   });
 
   it("expõe direction e status da última outbound para a prévia da conversa", async () => {
     const findByPhoneNumberId = vi.fn().mockResolvedValue(tenant);
-    const listByTenant = vi.fn().mockResolvedValue([
+    const listConversationSummaries = vi.fn().mockResolvedValue([
       {
         id: "conv-1",
-        tenantId: tenant.id,
         contactId: "contact-1",
         status: "open",
-        lastMessageAt: new Date("2026-06-12T12:05:00.000Z"),
+        lastMessageAt: new Date("2026-06-12T10:15:00.000Z"),
         createdAt: new Date("2026-06-12T10:00:00.000Z"),
-        updatedAt: new Date("2026-06-12T12:05:00.000Z"),
+        contactName: "Maria",
+        contactPhone: "5511999999999",
+        lastMessageBody: "Resposta entregue",
+        lastMessageDirection: "outbound",
+        lastMessageStatus: "delivered",
+        lastInboundMessageId: "msg-1",
+        lastInboundMessageAt: new Date("2026-06-12T10:10:00.000Z"),
+        unreadCount: 0,
       },
     ]);
 
     const service = new InboxService({
       tenantRepository: { findByPhoneNumberId },
-      conversationRepository: { listByTenant, findById: vi.fn() },
-      contactRepository: {
-        findByIds: vi.fn().mockResolvedValue([
-          {
-            id: "contact-1",
-            tenantId: tenant.id,
-            phone: "5511999999999",
-            name: "Maria",
-            createdAt: new Date(),
-            updatedAt: new Date(),
-          },
-        ]),
+      conversationRepository: {
         listByTenant: vi.fn(),
-      },
-      messageRepository: {
-        findByConversationId: vi.fn(),
-        findByConversationIds: vi.fn().mockResolvedValue([
-          {
-            id: "msg-1",
-            tenantId: tenant.id,
-            conversationId: "conv-1",
-            direction: "inbound",
-            body: "Oi",
-            status: "received",
-            externalMessageId: null,
-            failureCode: null,
-            failureReason: null,
-            failedAt: null,
-            replyToMessageId: null,
-            createdAt: new Date("2026-06-12T10:10:00.000Z"),
-            updatedAt: new Date("2026-06-12T10:10:00.000Z"),
-          },
-          {
-            id: "msg-2",
-            tenantId: tenant.id,
-            conversationId: "conv-1",
-            direction: "outbound",
-            body: "Resposta entregue",
-            status: "delivered",
-            externalMessageId: null,
-            failureCode: null,
-            failureReason: null,
-            failedAt: null,
-            replyToMessageId: null,
-            createdAt: new Date("2026-06-12T10:15:00.000Z"),
-            updatedAt: new Date("2026-06-12T10:15:00.000Z"),
-          },
-        ]),
-        findLatestByConversationId: vi.fn(),
-        findLatestInboundByConversationId: vi.fn(),
-      },
-      readStateRepository: {
-        findByConversationId: vi.fn(),
-        findByConversationIds: vi.fn().mockResolvedValue([]),
-        upsert: vi.fn(),
+        findById: vi.fn(),
+        listConversationSummaries,
       },
       operatorIdentityResolver: {
         getCurrentOperatorId: () => "operator-1",
@@ -349,94 +223,35 @@ describe("InboxService unread state", () => {
     expect(conversation?.lastMessage).toBe("Resposta entregue");
     expect(conversation?.lastMessageDirection).toBe("outbound");
     expect(conversation?.lastMessageStatus).toBe("delivered");
+    expect(conversation?.lastInboundMessageId).toBe("msg-1");
   });
 
-  it("sem read state conta todas as inbound como nao lidas", async () => {
+  it("conversa sem mensagens usa prévia padrão e cai no createdAt", async () => {
     const findByPhoneNumberId = vi.fn().mockResolvedValue(tenant);
-    const listByTenant = vi.fn().mockResolvedValue([
+    const listConversationSummaries = vi.fn().mockResolvedValue([
       {
         id: "conv-1",
-        tenantId: tenant.id,
         contactId: "contact-1",
         status: "open",
-        lastMessageAt: new Date("2026-06-12T12:05:00.000Z"),
+        lastMessageAt: null,
         createdAt: new Date("2026-06-12T10:00:00.000Z"),
-        updatedAt: new Date("2026-06-12T12:05:00.000Z"),
+        contactName: "Maria",
+        contactPhone: "5511999999999",
+        lastMessageBody: null,
+        lastMessageDirection: null,
+        lastMessageStatus: null,
+        lastInboundMessageId: null,
+        lastInboundMessageAt: null,
+        unreadCount: 0,
       },
     ]);
 
     const service = new InboxService({
       tenantRepository: { findByPhoneNumberId },
-      conversationRepository: { listByTenant, findById: vi.fn() },
-      contactRepository: {
-        findByIds: vi.fn().mockResolvedValue([
-          {
-            id: "contact-1",
-            tenantId: tenant.id,
-            phone: "5511999999999",
-            name: "Maria",
-            createdAt: new Date(),
-            updatedAt: new Date(),
-          },
-        ]),
+      conversationRepository: {
         listByTenant: vi.fn(),
-      },
-      messageRepository: {
-        findByConversationId: vi.fn(),
-        findByConversationIds: vi.fn().mockResolvedValue([
-          {
-            id: "msg-1",
-            tenantId: tenant.id,
-            conversationId: "conv-1",
-            direction: "inbound",
-            body: "Oi",
-            status: "received",
-            externalMessageId: null,
-            failureCode: null,
-            failureReason: null,
-            failedAt: null,
-            replyToMessageId: null,
-            createdAt: new Date("2026-06-12T10:10:00.000Z"),
-            updatedAt: new Date("2026-06-12T10:10:00.000Z"),
-          },
-          {
-            id: "msg-2",
-            tenantId: tenant.id,
-            conversationId: "conv-1",
-            direction: "outbound",
-            body: "Resposta",
-            status: "sent",
-            externalMessageId: null,
-            failureCode: null,
-            failureReason: null,
-            failedAt: null,
-            replyToMessageId: null,
-            createdAt: new Date("2026-06-12T10:15:00.000Z"),
-            updatedAt: new Date("2026-06-12T10:15:00.000Z"),
-          },
-          {
-            id: "msg-3",
-            tenantId: tenant.id,
-            conversationId: "conv-1",
-            direction: "inbound",
-            body: "Tudo bem?",
-            status: "received",
-            externalMessageId: null,
-            failureCode: null,
-            failureReason: null,
-            failedAt: null,
-            replyToMessageId: null,
-            createdAt: new Date("2026-06-12T10:20:00.000Z"),
-            updatedAt: new Date("2026-06-12T10:20:00.000Z"),
-          },
-        ]),
-        findLatestByConversationId: vi.fn(),
-        findLatestInboundByConversationId: vi.fn(),
-      },
-      readStateRepository: {
-        findByConversationId: vi.fn().mockResolvedValue(null),
-        findByConversationIds: vi.fn().mockResolvedValue([]),
-        upsert: vi.fn(),
+        findById: vi.fn(),
+        listConversationSummaries,
       },
       operatorIdentityResolver: {
         getCurrentOperatorId: () => "operator-1",
@@ -444,7 +259,15 @@ describe("InboxService unread state", () => {
     });
 
     const [conversation] = await service.listConversations();
-    expect(conversation?.unread).toBe(2);
+
+    expect(conversation?.lastMessage).toBe("Conversa iniciada no WhatsApp");
+    expect(conversation?.lastMessageDirection).toBeNull();
+    expect(conversation?.lastMessageStatus).toBeNull();
+    expect(conversation?.lastInboundMessageId).toBeNull();
+    expect(conversation?.lastInboundMessageAt).toBeNull();
+    expect(conversation?.unread).toBe(0);
+    // Sem lastMessageAt, a prévia ordena/exibe pelo createdAt da conversa.
+    expect(conversation?.lastMessageAt).toBe("2026-06-12T10:00:00.000Z");
   });
 
   it("markConversationAsRead grava estado e depois a conversa pode zerar para esse operador", async () => {
@@ -707,97 +530,58 @@ describe("InboxService unread state", () => {
     expect(upsert).not.toHaveBeenCalled();
   });
 
-  it("leitura de um operador nao zera para outro", async () => {
+  it("repassa o operatorId atual ao resumo (unread isolado por operador)", async () => {
     const findByPhoneNumberId = vi.fn().mockResolvedValue(tenant);
-    const listByTenant = vi.fn().mockResolvedValue([
-      {
+
+    function buildRow(unreadCount: number) {
+      return {
         id: "conv-1",
-        tenantId: tenant.id,
         contactId: "contact-1",
         status: "open",
-        lastMessageAt: new Date("2026-06-12T12:05:00.000Z"),
+        lastMessageAt: new Date("2026-06-12T10:10:00.000Z"),
         createdAt: new Date("2026-06-12T10:00:00.000Z"),
-        updatedAt: new Date("2026-06-12T12:05:00.000Z"),
-      },
-    ]);
-    const baseDependencies = {
-      tenantRepository: { findByPhoneNumberId },
-      conversationRepository: { listByTenant, findById: vi.fn() },
-      contactRepository: {
-        findByIds: vi.fn().mockResolvedValue([
-          {
-            id: "contact-1",
-            tenantId: tenant.id,
-            phone: "5511999999999",
-            name: "Maria",
-            createdAt: new Date(),
-            updatedAt: new Date(),
-          },
-        ]),
-        listByTenant: vi.fn(),
-      },
-      messageRepository: {
-        findByConversationId: vi.fn(),
-        findByConversationIds: vi.fn().mockResolvedValue([
-          {
-            id: "msg-1",
-            tenantId: tenant.id,
-            conversationId: "conv-1",
-            direction: "inbound",
-            body: "Oi",
-            status: "received",
-            externalMessageId: null,
-            failureCode: null,
-            failureReason: null,
-            failedAt: null,
-            replyToMessageId: null,
-            createdAt: new Date("2026-06-12T10:10:00.000Z"),
-            updatedAt: new Date("2026-06-12T10:10:00.000Z"),
-          },
-        ]),
-        findLatestByConversationId: vi.fn(),
-        findLatestInboundByConversationId: vi.fn(),
-      },
-    };
+        contactName: "Maria",
+        contactPhone: "5511999999999",
+        lastMessageBody: "Oi",
+        lastMessageDirection: "inbound" as const,
+        lastMessageStatus: "received",
+        lastInboundMessageId: "msg-1",
+        lastInboundMessageAt: new Date("2026-06-12T10:10:00.000Z"),
+        unreadCount,
+      };
+    }
+
+    // O isolamento por operador é resolvido na query (JOIN com read state pelo
+    // operatorId). Aqui garantimos que o service repassa o operatorId correto e
+    // reflete o unread retornado para cada operador.
+    const summariesOperatorOne = vi.fn().mockResolvedValue([buildRow(0)]);
+    const summariesOperatorTwo = vi.fn().mockResolvedValue([buildRow(1)]);
 
     const operatorOne = new InboxService({
-      ...baseDependencies,
-      readStateRepository: {
-        findByConversationId: vi.fn(),
-        findByConversationIds: vi.fn().mockResolvedValue([
-          {
-            id: "state-1",
-            tenantId: tenant.id,
-            conversationId: "conv-1",
-            operatorId: "operator-1",
-            lastReadAt: new Date("2026-06-12T10:30:00.000Z"),
-            lastReadMessageId: "msg-1",
-            createdAt: new Date(),
-            updatedAt: new Date(),
-          },
-        ]),
-        upsert: vi.fn(),
+      tenantRepository: { findByPhoneNumberId },
+      conversationRepository: {
+        listByTenant: vi.fn(),
+        findById: vi.fn(),
+        listConversationSummaries: summariesOperatorOne,
       },
-      operatorIdentityResolver: {
-        getCurrentOperatorId: () => "operator-1",
-      },
+      operatorIdentityResolver: { getCurrentOperatorId: () => "operator-1" },
     });
 
     const operatorTwo = new InboxService({
-      ...baseDependencies,
-      readStateRepository: {
-        findByConversationId: vi.fn(),
-        findByConversationIds: vi.fn().mockResolvedValue([]),
-        upsert: vi.fn(),
+      tenantRepository: { findByPhoneNumberId },
+      conversationRepository: {
+        listByTenant: vi.fn(),
+        findById: vi.fn(),
+        listConversationSummaries: summariesOperatorTwo,
       },
-      operatorIdentityResolver: {
-        getCurrentOperatorId: () => "operator-2",
-      },
+      operatorIdentityResolver: { getCurrentOperatorId: () => "operator-2" },
     });
 
     const [conversationForOperatorOne] = await operatorOne.listConversations();
     const [conversationForOperatorTwo] = await operatorTwo.listConversations();
 
+    expect(summariesOperatorOne).toHaveBeenCalledWith(tenant.id, "operator-1");
+    expect(summariesOperatorTwo).toHaveBeenCalledWith(tenant.id, "operator-2");
     expect(conversationForOperatorOne?.unread).toBe(0);
     expect(conversationForOperatorTwo?.unread).toBe(1);
   });

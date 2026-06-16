@@ -1,3 +1,6 @@
+import type { Logger } from "pino";
+import { createLogger } from "../../../../shared/logger/logger.js";
+import { LogEvents } from "../../../../shared/logger/events.js";
 import {
   AiSafetyGuardService,
 } from "../guardrails/AiSafetyGuardService.js";
@@ -55,6 +58,7 @@ export interface AiSuggestionServiceDependencies {
     systemPrompt: string;
   }) => AiResponseExecutionService;
   now?: () => Date;
+  log?: Logger;
 }
 
 export class AiSuggestionService {
@@ -73,6 +77,7 @@ export class AiSuggestionService {
     systemPrompt: string;
   }) => AiResponseExecutionService;
   private readonly now: () => Date;
+  private readonly log: Logger;
 
   constructor(dependencies: AiSuggestionServiceDependencies) {
     this.safetyGuard = dependencies.safetyGuard ?? new AiSafetyGuardService();
@@ -82,10 +87,22 @@ export class AiSuggestionService {
     this.aiResponseServiceFactory =
       dependencies.aiResponseServiceFactory ?? createSuggestionAiResponseService;
     this.now = dependencies.now ?? (() => new Date());
+    this.log = dependencies.log ?? createLogger({ module: "ai-suggestion" });
   }
 
   async suggest(input: AiSuggestionServiceInput): Promise<AiSuggestionResult> {
     const now = this.now();
+    const startedAt = Date.now();
+    // Correlação por domínio (sem texto/prompt). requestId fica no log HTTP da rota.
+    const correlation = {
+      correlationId: input.conversationId,
+      tenantId: input.tenantId,
+      conversationId: input.conversationId,
+    };
+    this.log.info(
+      { event: LogEvents.ai.suggestionStarted, ...correlation },
+      "ai suggestion started"
+    );
     const windowMinutes =
       input.recentHighRiskWindowMinutes ?? DEFAULT_RECENT_HIGH_RISK_WINDOW_MINUTES;
     const since = new Date(now.getTime() - windowMinutes * 60_000);
@@ -120,6 +137,18 @@ export class AiSuggestionService {
         outputCharCount: null,
         model: null,
       });
+
+      this.log.warn(
+        {
+          event: LogEvents.ai.suggestionBlocked,
+          ...correlation,
+          stage: "input",
+          riskLevel: inputDecision.riskLevel,
+          riskReasons: inputDecision.riskReasons,
+          durationMs: Date.now() - startedAt,
+        },
+        "ai suggestion blocked"
+      );
 
       return {
         suggestion: null,
@@ -160,10 +189,32 @@ export class AiSuggestionService {
         blocked: true,
         source: result.source,
         promptVersion: prompt.version,
+        provider: result.source,
         inputCharCount: input.userMessage.length,
         outputCharCount: result.text.length,
         model: result.model ?? null,
+        promptTokens: result.usage?.promptTokens ?? null,
+        ...(result.usage?.cachedPromptTokens != null
+          ? { cachedPromptTokens: result.usage.cachedPromptTokens }
+          : {}),
+        completionTokens: result.usage?.completionTokens ?? null,
+        totalTokens: result.usage?.totalTokens ?? null,
+        durationMs: Date.now() - startedAt,
+        contextItemsCount: result.contextItemsCount ?? null,
+        contextChars: result.contextChars ?? null,
       });
+
+      this.log.warn(
+        {
+          event: LogEvents.ai.suggestionBlocked,
+          ...correlation,
+          stage: "output",
+          riskLevel: outputDecision.riskLevel,
+          riskReasons: outputDecision.riskReasons,
+          durationMs: Date.now() - startedAt,
+        },
+        "ai suggestion output blocked"
+      );
 
       return {
         suggestion: null,
@@ -188,10 +239,31 @@ export class AiSuggestionService {
       blocked: false,
       source: result.source,
       promptVersion: prompt.version,
+      provider: result.source,
       inputCharCount: input.userMessage.length,
       outputCharCount: result.text.length,
       model: result.model ?? null,
+      promptTokens: result.usage?.promptTokens ?? null,
+      ...(result.usage?.cachedPromptTokens != null
+        ? { cachedPromptTokens: result.usage.cachedPromptTokens }
+        : {}),
+      completionTokens: result.usage?.completionTokens ?? null,
+      totalTokens: result.usage?.totalTokens ?? null,
+      durationMs: Date.now() - startedAt,
+      contextItemsCount: result.contextItemsCount ?? null,
+      contextChars: result.contextChars ?? null,
     });
+
+    this.log.info(
+      {
+        event: LogEvents.ai.suggestionCompleted,
+        ...correlation,
+        source: result.source,
+        riskLevel: inputDecision.riskLevel,
+        durationMs: Date.now() - startedAt,
+      },
+      "ai suggestion completed"
+    );
 
     return {
       suggestion: result.text,
@@ -213,12 +285,8 @@ function createSuggestionAiResponseService(input: {
 
   return {
     async generateResponse(payload) {
-      const result = await service.generateResponse(payload);
-
-      return {
-        ...result,
-        model: null,
-      };
+      // Repassa model/usage/contexto vindos do AiResponseService (controle de custo).
+      return service.generateResponse(payload);
     },
   };
 }

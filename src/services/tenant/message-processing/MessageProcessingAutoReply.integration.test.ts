@@ -5,6 +5,7 @@ import { drizzle } from "drizzle-orm/postgres-js";
 import { env } from "../../../config/env.js";
 import * as schema from "../../../db/schema/index.js";
 import {
+  aiInteractionLogs,
   tenants,
   whatsappContacts,
   whatsappConversations,
@@ -79,6 +80,11 @@ describeDatabase("auto-reply E2E (inbound → worker → outbound)", () => {
   });
 
   afterAll(async () => {
+    // O auto-reply agora registra uso em ai_interaction_logs (FK p/ conversa/
+    // contato/tenant): limpar ANTES das tabelas referenciadas.
+    await database
+      .delete(aiInteractionLogs)
+      .where(eq(aiInteractionLogs.tenantId, tenantId));
     await database
       .delete(whatsappMessages)
       .where(eq(whatsappMessages.tenantId, tenantId));

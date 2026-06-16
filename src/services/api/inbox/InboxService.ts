@@ -11,8 +11,18 @@ import {
 } from "../../../repositories/tenant/whatsapp/index.js";
 import {
   AiSuggestionService,
+  AiUsageService,
+  AI_USAGE_RISK_LEVELS,
+  AI_USAGE_SOURCES,
+  AI_USAGE_STAGES,
+  clampUsageLimit,
+  parseUsageBoolean,
+  parseUsageEnum,
+  parseUsageTextFilter,
+  resolveUsageWindow,
 } from "../../tenant/ai/index.js";
 import type { AiSuggestionResult } from "../../../types/tenant/ai/AiSuggestionTypes.js";
+import type { AiUsageResult } from "../../../types/tenant/ai/AiUsageTypes.js";
 import { InboxOperatorIdentityResolver } from "./InboxOperatorIdentityResolver.js";
 import {
   clampMessageLimit,
@@ -59,6 +69,8 @@ export interface InboxConversationSummary {
   lastMessageDirection: "inbound" | "outbound" | null;
   lastMessageStatus: "pending" | InboxMessageStatus | null;
   lastMessageAt: string;
+  lastInboundMessageId: string | null;
+  lastInboundMessageAt: string | null;
 }
 
 export type InboxMessageStatus =
@@ -124,7 +136,7 @@ export interface InboxServiceDependencies {
   tenantRepository?: Pick<WhatsAppTenantRepository, "findByPhoneNumberId">;
   conversationRepository?: Pick<
     WhatsAppConversationRepository,
-    "findById" | "findByContactId" | "listByTenant"
+    "findById" | "findByContactId" | "listByTenant" | "listConversationSummaries"
   >;
   contactRepository?: Pick<
     WhatsAppContactRepository,
@@ -152,6 +164,7 @@ export interface InboxServiceDependencies {
     "listByOperator" | "saveAndTrim" | "clearByOperator"
   >;
   aiSuggestionService?: Pick<AiSuggestionService, "suggest">;
+  aiUsageService?: Pick<AiUsageService, "getUsage">;
 }
 
 export class InboxService {
@@ -163,6 +176,7 @@ export class InboxService {
   private readonly operatorIdentityResolver: Required<InboxServiceDependencies>["operatorIdentityResolver"];
   private readonly recentSearchRepository: Required<InboxServiceDependencies>["recentSearchRepository"];
   private readonly aiSuggestionService: Required<InboxServiceDependencies>["aiSuggestionService"];
+  private readonly aiUsageService: Required<InboxServiceDependencies>["aiUsageService"];
 
   constructor(dependencies: InboxServiceDependencies = {}) {
     this.tenantRepository =
@@ -181,6 +195,8 @@ export class InboxService {
       dependencies.recentSearchRepository ?? new InboxRecentSearchRepository();
     this.aiSuggestionService =
       dependencies.aiSuggestionService ?? new AiSuggestionService({});
+    this.aiUsageService =
+      dependencies.aiUsageService ?? new AiUsageService();
   }
 
   async getMe(): Promise<InboxAgentProfile> {
@@ -200,78 +216,32 @@ export class InboxService {
   async listConversations(): Promise<InboxConversationSummary[]> {
     const tenant = await this.resolveCurrentTenant();
     const operatorId = this.operatorIdentityResolver.getCurrentOperatorId();
-    const conversations = await this.conversationRepository.listByTenant(tenant.id);
-
-    if (conversations.length === 0) {
-      return [];
-    }
-
-    const contactIds = [...new Set(conversations.map((conversation) => conversation.contactId))];
-    const conversationIds = conversations.map((conversation) => conversation.id);
-    const [contacts, messages, readStates] = await Promise.all([
-      this.contactRepository.findByIds(tenant.id, contactIds),
-      this.messageRepository.findByConversationIds(tenant.id, conversationIds),
-      this.readStateRepository.findByConversationIds(
-        tenant.id,
-        operatorId,
-        conversationIds
-      ),
-    ]);
-    const contactsById = new Map(contacts.map((contact) => [contact.id, contact]));
-    const lastMessageMetaByConversationId = new Map<
-      string,
-      {
-        body: string;
-        direction: "inbound" | "outbound";
-        status: string;
-      }
-    >();
-    const unreadByConversationId = new Map<string, number>();
-    const readStateByConversationId = new Map(
-      readStates.map((state) => [state.conversationId, state])
+    // A-01: preview + unread por conversa são resolvidos em UMA query no Postgres
+    // (DISTINCT ON + agregação), sem carregar todas as mensagens do tenant.
+    const summaries = await this.conversationRepository.listConversationSummaries(
+      tenant.id,
+      operatorId
     );
 
-    for (const message of messages) {
-      lastMessageMetaByConversationId.set(message.conversationId, {
-        body: message.body,
-        direction: message.direction,
-        status: message.status,
-      });
-
-      if (message.direction !== "inbound") {
-        continue;
-      }
-
-      const lastReadAt = readStateByConversationId.get(message.conversationId)?.lastReadAt;
-      const isUnread = !lastReadAt || message.createdAt > lastReadAt;
-
-      if (isUnread) {
-        unreadByConversationId.set(
-          message.conversationId,
-          (unreadByConversationId.get(message.conversationId) ?? 0) + 1
-        );
-      }
-    }
-
-    return conversations.map((conversation) => {
-      const contact = contactsById.get(conversation.contactId);
-      const contactName = contact?.name?.trim() || "Contato sem nome";
-      const lastMessageMeta = lastMessageMetaByConversationId.get(conversation.id);
-      const lastMessage = lastMessageMeta?.body ?? "Conversa iniciada no WhatsApp";
+    return summaries.map((row) => {
+      const contactName = row.contactName?.trim() || "Contato sem nome";
+      const lastMessage = row.lastMessageBody ?? "Conversa iniciada no WhatsApp";
 
       return {
-        id: conversation.id,
+        id: row.id,
         contactName,
-        contactPhone: contact?.phone ?? "",
-        avatarColor: pickAvatarColor(conversation.contactId),
-        unread: unreadByConversationId.get(conversation.id) ?? 0,
+        contactPhone: row.contactPhone ?? "",
+        avatarColor: pickAvatarColor(row.contactId),
+        unread: row.unreadCount,
         lastMessage,
-        lastMessageDirection: lastMessageMeta?.direction ?? null,
+        lastMessageDirection: row.lastMessageDirection,
         lastMessageStatus:
-          lastMessageMeta?.direction === "outbound"
-            ? normalizeConversationPreviewStatus(lastMessageMeta.status)
+          row.lastMessageDirection === "outbound"
+            ? normalizeConversationPreviewStatus(row.lastMessageStatus ?? "")
             : null,
-        lastMessageAt: (conversation.lastMessageAt ?? conversation.createdAt).toISOString(),
+        lastMessageAt: (row.lastMessageAt ?? row.createdAt).toISOString(),
+        lastInboundMessageId: row.lastInboundMessageId ?? null,
+        lastInboundMessageAt: row.lastInboundMessageAt?.toISOString() ?? null,
       };
     });
   }
@@ -565,6 +535,51 @@ export class InboxService {
         content: message.body,
       })),
     });
+  }
+
+  /**
+   * Painel read-only de uso da IA (tenant-scoped). Resolve o tenant no servidor,
+   * clampeia janela/limit e delega a agregação ao AiUsageService. Não retorna
+   * prompt, mensagem ou resposta — apenas métricas/metadados seguros.
+   */
+  async getAiUsage(
+    options: {
+      from?: string;
+      to?: string;
+      conversationId?: string;
+      limit?: unknown;
+      cursor?: string;
+      model?: string;
+      source?: string;
+      provider?: string;
+      riskLevel?: string;
+      blocked?: unknown;
+      stage?: string;
+    } = {}
+  ): Promise<AiUsageResult> {
+    const tenant = await this.resolveCurrentTenant();
+    const { from, to } = resolveUsageWindow({
+      from: options.from,
+      to: options.to,
+    });
+    const limit = clampUsageLimit(options.limit);
+
+    return this.aiUsageService.getUsage(
+      {
+        tenantId: tenant.id,
+        from,
+        to,
+        conversationId: parseUsageTextFilter(options.conversationId),
+        model: parseUsageTextFilter(options.model),
+        source: parseUsageEnum(options.source, AI_USAGE_SOURCES),
+        provider: parseUsageTextFilter(options.provider),
+        riskLevel: parseUsageEnum(options.riskLevel, AI_USAGE_RISK_LEVELS),
+        blocked: parseUsageBoolean(options.blocked),
+        stage: parseUsageEnum(options.stage, AI_USAGE_STAGES),
+      },
+      limit,
+      options.cursor ?? null
+    );
   }
 
   private async resolveCurrentTenant() {

@@ -41,6 +41,7 @@ describe("MessageProcessingProcessor", () => {
       aiResponseService: {
         generateResponse,
       },
+      interactionLogService: { record: vi.fn() },
       log: createLogger({ test: "processor" }),
     });
 
@@ -76,6 +77,8 @@ describe("MessageProcessingProcessor", () => {
     outboundService: { sendMessage: ReturnType<typeof vi.fn> };
     aiText?: string;
     direction?: string;
+    record?: ReturnType<typeof vi.fn>;
+    generateResponse?: ReturnType<typeof vi.fn>;
   }) {
     return createMessageProcessingProcessor({
       messageRepository: {
@@ -90,14 +93,21 @@ describe("MessageProcessingProcessor", () => {
         ]),
       },
       conversationRepository: {
-        findById: vi.fn().mockResolvedValue({ id: "conversation-1", tenantId: "tenant-1" }),
-      },
-      aiResponseService: {
-        generateResponse: vi.fn().mockResolvedValue({
-          text: opts.aiText ?? "Olá! Como posso ajudar?",
-          source: "stub",
+        findById: vi.fn().mockResolvedValue({
+          id: "conversation-1",
+          tenantId: "tenant-1",
+          contactId: "contact-1",
         }),
       },
+      aiResponseService: {
+        generateResponse:
+          opts.generateResponse ??
+          vi.fn().mockResolvedValue({
+            text: opts.aiText ?? "Olá! Como posso ajudar?",
+            source: "stub",
+          }),
+      },
+      interactionLogService: { record: opts.record ?? vi.fn() },
       log: createLogger({ test: "processor" }),
       autoReplyEnabled: opts.autoReplyEnabled,
       outboundService: opts.outboundService,
@@ -286,9 +296,14 @@ describe("MessageProcessingProcessor", () => {
         conversationRepository: {
           findById: vi
             .fn()
-            .mockResolvedValue({ id: "conversation-1", tenantId: "tenant-1" }),
+            .mockResolvedValue({
+              id: "conversation-1",
+              tenantId: "tenant-1",
+              contactId: "contact-1",
+            }),
         },
         aiResponseService: { generateResponse },
+        interactionLogService: { record: vi.fn() },
         log: createLogger({ test: "takeover" }),
         autoReplyEnabled: true,
         outboundService: { sendMessage: opts.sendMessage },
@@ -414,9 +429,14 @@ describe("MessageProcessingProcessor", () => {
         conversationRepository: {
           findById: vi
             .fn()
-            .mockResolvedValue({ id: "conversation-1", tenantId: "tenant-1" }),
+            .mockResolvedValue({
+              id: "conversation-1",
+              tenantId: "tenant-1",
+              contactId: "contact-1",
+            }),
         },
         aiResponseService: { generateResponse },
+        interactionLogService: { record: vi.fn() },
         log: createLogger({ test: "takeover" }),
         autoReplyEnabled: true,
         outboundService: { sendMessage },
@@ -447,6 +467,138 @@ describe("MessageProcessingProcessor", () => {
         "tenant-1",
         "conversation-1"
       );
+    });
+  });
+
+  describe("registro de uso da IA (controle de custo)", () => {
+    const aiWithUsage = () =>
+      vi.fn().mockResolvedValue({
+        text: "Temos o plano Start por R$ 79,90.",
+        source: "openai",
+        model: "gpt-4o-mini",
+        usage: {
+          promptTokens: 120,
+          completionTokens: 30,
+          totalTokens: 150,
+        },
+        contextItemsCount: 3,
+        contextChars: 2048,
+      });
+
+    it("registra uso seguro com stage auto_reply e metadados completos", async () => {
+      const record = vi.fn();
+      const processor = buildProcessorWithAutoReply({
+        autoReplyEnabled: true,
+        outboundService: { sendMessage: vi.fn().mockResolvedValue({ id: "out-1" }) },
+        record,
+        generateResponse: aiWithUsage(),
+      });
+
+      await processor.processMessageJob(job);
+
+      expect(record).toHaveBeenCalledTimes(1);
+      const logged = record.mock.calls[0]![0];
+      expect(logged).toMatchObject({
+        tenantId: "tenant-1",
+        conversationId: "conversation-1",
+        contactId: "contact-1",
+        stage: "auto_reply",
+        action: "allow",
+        riskLevel: "low",
+        blocked: false,
+        source: "openai",
+        provider: "openai",
+        model: "gpt-4o-mini",
+        promptTokens: 120,
+        completionTokens: 30,
+        totalTokens: 150,
+        contextItemsCount: 3,
+        contextChars: 2048,
+        inputCharCount: 2, // "oi"
+        outputCharCount: "Temos o plano Start por R$ 79,90.".length,
+      });
+      expect(logged.durationMs).toEqual(expect.any(Number));
+      expect(logged.durationMs).toBeGreaterThanOrEqual(0);
+    });
+
+    it("NÃO persiste prompt, mensagem ou resposta crua (apenas metadados)", async () => {
+      const record = vi.fn();
+      const processor = buildProcessorWithAutoReply({
+        autoReplyEnabled: true,
+        outboundService: { sendMessage: vi.fn().mockResolvedValue({ id: "out-1" }) },
+        record,
+        generateResponse: aiWithUsage(),
+      });
+
+      await processor.processMessageJob(job);
+
+      const logged = record.mock.calls[0]![0];
+      const serialized = JSON.stringify(logged);
+      // Sem texto do usuário, sem resposta da IA, sem prompt/system prompt.
+      expect(serialized).not.toContain("oi");
+      expect(serialized).not.toContain("Temos o plano Start");
+      expect(Object.keys(logged)).not.toContain("text");
+      expect(Object.keys(logged)).not.toContain("prompt");
+      expect(Object.keys(logged)).not.toContain("systemPrompt");
+    });
+
+    it("usage ausente: tokens nulos e fluxo não quebra", async () => {
+      const record = vi.fn();
+      const processor = buildProcessorWithAutoReply({
+        autoReplyEnabled: true,
+        outboundService: { sendMessage: vi.fn().mockResolvedValue({ id: "out-1" }) },
+        record,
+        // sem usage/model/context
+        generateResponse: vi
+          .fn()
+          .mockResolvedValue({ text: "Olá!", source: "stub" }),
+      });
+
+      const result = await processor.processMessageJob(job);
+
+      expect(result.processed).toBe(true);
+      const logged = record.mock.calls[0]![0];
+      expect(logged).toMatchObject({
+        stage: "auto_reply",
+        source: "stub",
+        model: null,
+        promptTokens: null,
+        completionTokens: null,
+        totalTokens: null,
+        contextItemsCount: null,
+        contextChars: null,
+      });
+    });
+
+    it("registra uso mesmo com auto-reply DESLIGADO (a IA é chamada)", async () => {
+      const record = vi.fn();
+      const processor = buildProcessorWithAutoReply({
+        autoReplyEnabled: false,
+        outboundService: { sendMessage: vi.fn() },
+        record,
+        generateResponse: aiWithUsage(),
+      });
+
+      await processor.processMessageJob(job);
+
+      expect(record).toHaveBeenCalledTimes(1);
+      expect(record.mock.calls[0]![0]).toMatchObject({ stage: "auto_reply" });
+    });
+
+    it("falha ao registrar log NÃO derruba a resposta automática", async () => {
+      const record = vi.fn().mockRejectedValue(new Error("db down"));
+      const sendMessage = vi.fn().mockResolvedValue({ id: "out-1" });
+      const processor = buildProcessorWithAutoReply({
+        autoReplyEnabled: true,
+        outboundService: { sendMessage },
+        record,
+        generateResponse: aiWithUsage(),
+      });
+
+      const result = await processor.processMessageJob(job);
+
+      expect(result.processed).toBe(true);
+      expect(sendMessage).toHaveBeenCalledTimes(1);
     });
   });
 

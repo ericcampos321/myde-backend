@@ -5,6 +5,9 @@ import {
   AiResponseService,
   createAiResponseService,
 } from "../ai/index.js";
+import { AiInteractionLogService } from "../ai/interactions/AiInteractionLogService.js";
+import type { AiResponseResult } from "../../../types/tenant/ai/AiTypes.js";
+import type { WhatsAppConversationRow } from "../../../db/schema/index.js";
 import {
   WhatsAppOutboundService,
   type SendMessageInput,
@@ -33,6 +36,8 @@ export interface MessageProcessingProcessorDependencies {
   >;
   conversationRepository?: Pick<WhatsAppConversationRepository, "findById">;
   aiResponseService?: Pick<AiResponseService, "generateResponse">;
+  /** Registra uso seguro da IA (controle de custo). Default: serviço real. */
+  interactionLogService?: Pick<AiInteractionLogService, "record">;
   log?: Logger;
   /** Liga o envio automático da resposta. Default: flag de ambiente. */
   autoReplyEnabled?: boolean;
@@ -47,6 +52,7 @@ interface ResolvedProcessorDependencies {
   >;
   conversationRepository: Pick<WhatsAppConversationRepository, "findById">;
   aiResponseService: Pick<AiResponseService, "generateResponse">;
+  interactionLogService: Pick<AiInteractionLogService, "record">;
   log: Logger;
   autoReplyEnabled: boolean;
   outboundService: OutboundReplySender | null;
@@ -129,6 +135,7 @@ export class MessageProcessingProcessor {
       }
     }
 
+    const aiStartedAt = Date.now();
     const aiResponse = await this.dependencies.aiResponseService.generateResponse(
       {
         currentMessage: message.body,
@@ -140,6 +147,17 @@ export class MessageProcessingProcessor {
           })),
       }
     );
+    const aiDurationMs = Date.now() - aiStartedAt;
+
+    // A IA foi realmente chamada (independe do auto-reply ser enviado): registra
+    // o uso seguro para o painel de custo. Nunca quebra o fluxo automático.
+    await this.recordAutoReplyUsage({
+      payload,
+      conversation,
+      inputCharCount: message.body.length,
+      aiResponse,
+      durationMs: aiDurationMs,
+    });
 
     this.dependencies.log.info(
       {
@@ -181,6 +199,63 @@ export class MessageProcessingProcessor {
       aiResponseText: aiResponse.text,
       aiSource: aiResponse.source,
     };
+  }
+
+  /**
+   * Registra o uso seguro da IA do auto-reply em `ai_interaction_logs`
+   * (stage `auto_reply`). Persiste apenas metadados/contagens — NUNCA prompt,
+   * mensagem, resposta crua, token ou segredo. Falha de log nunca derruba o
+   * fluxo: erros são apenas logados e engolidos (resposta automática segue).
+   */
+  private async recordAutoReplyUsage(args: {
+    payload: MessageProcessingJobPayload;
+    conversation: Pick<WhatsAppConversationRow, "id" | "contactId">;
+    inputCharCount: number;
+    aiResponse: AiResponseResult;
+    durationMs: number;
+  }): Promise<void> {
+    const { payload, conversation, inputCharCount, aiResponse, durationMs } =
+      args;
+    try {
+      await this.dependencies.interactionLogService.record({
+        tenantId: payload.tenantId,
+        conversationId: conversation.id,
+        contactId: conversation.contactId,
+        operatorId: null,
+        stage: "auto_reply",
+        // Sem guardrail neste caminho: a geração é registrada como permitida.
+        action: "allow",
+        riskLevel: "low",
+        riskReasons: [],
+        matchedRules: [],
+        blocked: false,
+        source: aiResponse.source,
+        provider: aiResponse.source,
+        promptVersion: null,
+        inputCharCount,
+        outputCharCount: aiResponse.text.length,
+        model: aiResponse.model ?? null,
+        promptTokens: aiResponse.usage?.promptTokens ?? null,
+        ...(aiResponse.usage?.cachedPromptTokens != null
+          ? { cachedPromptTokens: aiResponse.usage.cachedPromptTokens }
+          : {}),
+        completionTokens: aiResponse.usage?.completionTokens ?? null,
+        totalTokens: aiResponse.usage?.totalTokens ?? null,
+        durationMs,
+        contextItemsCount: aiResponse.contextItemsCount ?? null,
+        contextChars: aiResponse.contextChars ?? null,
+      });
+    } catch (error) {
+      this.dependencies.log.warn(
+        {
+          tenantId: payload.tenantId,
+          conversationId: conversation.id,
+          messageId: payload.messageId,
+          error: error instanceof Error ? error.message : "unknown",
+        },
+        "[auto-reply] falha ao registrar uso da IA (ignorado)"
+      );
+    }
   }
 
   /** Loga (seguro) e devolve o resultado de job pulado por decisão de auto-reply. */
@@ -266,6 +341,8 @@ export function createMessageProcessingProcessor(
       dependencies.conversationRepository ?? new WhatsAppConversationRepository(),
     aiResponseService:
       dependencies.aiResponseService ?? createAiResponseService(),
+    interactionLogService:
+      dependencies.interactionLogService ?? new AiInteractionLogService(),
     log:
       dependencies.log ??
       createLogger({ module: "message-processing-processor" }),

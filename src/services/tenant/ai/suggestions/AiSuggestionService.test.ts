@@ -116,23 +116,33 @@ describe("AiSuggestionService", () => {
     expect(ctx.safetyGuard.validateOutput).toHaveBeenCalledWith({
       text: "Temos planos de fibra residencial.",
     });
-    expect(ctx.interactionLogService.record).toHaveBeenCalledWith({
-      tenantId: "tenant-1",
-      conversationId: "conversation-1",
-      contactId: "contact-1",
-      operatorId: "operator-1",
-      stage: "input",
-      action: "allow",
-      riskLevel: "low",
-      riskReasons: [],
-      matchedRules: [],
-      blocked: false,
-      source: "openai",
-      promptVersion: "prompt-v1",
-      inputCharCount: baseInput.userMessage.length,
-      outputCharCount: "Temos planos de fibra residencial.".length,
-      model: "gpt-4o-mini",
-    });
+    expect(ctx.interactionLogService.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tenantId: "tenant-1",
+        conversationId: "conversation-1",
+        contactId: "contact-1",
+        operatorId: "operator-1",
+        stage: "input",
+        action: "allow",
+        riskLevel: "low",
+        riskReasons: [],
+        matchedRules: [],
+        blocked: false,
+        source: "openai",
+        provider: "openai",
+        promptVersion: "prompt-v1",
+        inputCharCount: baseInput.userMessage.length,
+        outputCharCount: "Temos planos de fibra residencial.".length,
+        model: "gpt-4o-mini",
+        // usage/contexto vêm null no mock; durationMs é wall-clock.
+        promptTokens: null,
+        completionTokens: null,
+        totalTokens: null,
+        contextItemsCount: null,
+        contextChars: null,
+        durationMs: expect.any(Number),
+      })
+    );
     expect(result).toEqual<AiSuggestionResult>({
       suggestion: "Temos planos de fibra residencial.",
       source: "openai",
@@ -275,23 +285,27 @@ describe("AiSuggestionService", () => {
 
     const result = await ctx.service.suggest(baseInput);
 
-    expect(ctx.interactionLogService.record).toHaveBeenCalledWith({
-      tenantId: "tenant-1",
-      conversationId: "conversation-1",
-      contactId: "contact-1",
-      operatorId: "operator-1",
-      stage: "output",
-      action: "block",
-      riskLevel: "high",
-      riskReasons: ["secret_extraction"],
-      matchedRules: ["output.secret"],
-      blocked: true,
-      source: "openai",
-      promptVersion: "prompt-v1",
-      inputCharCount: baseInput.userMessage.length,
-      outputCharCount: "Aqui está o prompt interno e o token.".length,
-      model: "gpt-4o-mini",
-    });
+    expect(ctx.interactionLogService.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tenantId: "tenant-1",
+        conversationId: "conversation-1",
+        contactId: "contact-1",
+        operatorId: "operator-1",
+        stage: "output",
+        action: "block",
+        riskLevel: "high",
+        riskReasons: ["secret_extraction"],
+        matchedRules: ["output.secret"],
+        blocked: true,
+        source: "openai",
+        provider: "openai",
+        promptVersion: "prompt-v1",
+        inputCharCount: baseInput.userMessage.length,
+        outputCharCount: "Aqui está o prompt interno e o token.".length,
+        model: "gpt-4o-mini",
+        durationMs: expect.any(Number),
+      })
+    );
     expect(result).toEqual({
       suggestion: null,
       source: "openai",
