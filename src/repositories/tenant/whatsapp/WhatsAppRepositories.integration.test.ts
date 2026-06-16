@@ -589,3 +589,39 @@ describeDatabase("busca de mensagens (searchByConversationId)", () => {
     expect(page.items.map((m) => m.body)).toEqual(["Suave Eric", "Fala Eric"]);
   });
 });
+
+describeDatabase("contexto bounded do worker (findRecentByConversationId)", () => {
+  it("conversa longa (150 msgs) retorna no máximo N e as mais recentes em ASC", async () => {
+    const { tenant, conversation } = await createConversation();
+    const base = Date.UTC(2026, 5, 12, 8, 0, 0);
+    const total = 150;
+
+    // Insere em lote para velocidade (1 query); createdAt crescente (i=0 mais antiga).
+    await db.insert(whatsappMessages).values(
+      Array.from({ length: total }, (_, i) => ({
+        tenantId: tenant.id,
+        conversationId: conversation.id,
+        direction: "inbound" as const,
+        body: `bulk-${i}`,
+        status: "received",
+        externalMessageId: `${marker}-bulk-${conversation.id}-${i}`,
+        createdAt: new Date(base + i * 60_000),
+      }))
+    );
+
+    const limit = 50;
+    const recent = await messageRepository.findRecentByConversationId(
+      tenant.id,
+      conversation.id,
+      limit
+    );
+
+    // A-02: NÃO carrega as 150 — no máximo N (a janela de contexto do worker).
+    expect(recent).toHaveLength(limit);
+    // As N MAIS recentes (bulk-100..bulk-149), em ordem ASC (cronológica p/ prompt).
+    // bulk-149 é a "mensagem inbound atual" → garantidamente incluída no contexto.
+    expect(recent[0]!.body).toBe("bulk-100");
+    expect(recent[recent.length - 1]!.body).toBe("bulk-149");
+    expect(recent.every((m) => m.conversationId === conversation.id)).toBe(true);
+  });
+});

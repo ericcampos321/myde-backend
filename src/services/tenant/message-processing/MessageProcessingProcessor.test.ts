@@ -17,7 +17,7 @@ describe("MessageProcessingProcessor", () => {
           direction: "inbound",
           body: "Quais planos voces tem?",
         }),
-        findByConversationId: vi.fn().mockResolvedValue([
+        findRecentByConversationId: vi.fn().mockResolvedValue([
           {
             id: "message-0",
             tenantId: "tenant-1",
@@ -88,7 +88,7 @@ describe("MessageProcessingProcessor", () => {
           direction: opts.direction ?? "inbound",
           body: "oi",
         }),
-        findByConversationId: vi.fn().mockResolvedValue([
+        findRecentByConversationId: vi.fn().mockResolvedValue([
           { id: "message-1", tenantId: "tenant-1", direction: "inbound", body: "oi" },
         ]),
       },
@@ -282,7 +282,7 @@ describe("MessageProcessingProcessor", () => {
       sendMessage: ReturnType<typeof vi.fn>;
       generateResponse?: ReturnType<typeof vi.fn>;
     }) {
-      const findByConversationId = vi
+      const findRecentByConversationId = vi
         .fn()
         .mockResolvedValue(opts.conversationMessages);
       const generateResponse =
@@ -291,7 +291,7 @@ describe("MessageProcessingProcessor", () => {
       const processor = createMessageProcessingProcessor({
         messageRepository: {
           findById: vi.fn().mockResolvedValue(inbound),
-          findByConversationId,
+          findRecentByConversationId,
         },
         conversationRepository: {
           findById: vi
@@ -308,7 +308,7 @@ describe("MessageProcessingProcessor", () => {
         autoReplyEnabled: true,
         outboundService: { sendMessage: opts.sendMessage },
       });
-      return { processor, findByConversationId, generateResponse };
+      return { processor, findRecentByConversationId, generateResponse };
     }
 
     const job = {
@@ -414,7 +414,7 @@ describe("MessageProcessingProcessor", () => {
         .mockResolvedValue({ text: "resposta IA", source: "stub" });
       // 1ª busca (pré-IA): sem manual → IA roda. 2ª busca (pré-envio): manual
       // surgiu durante a geração → bloqueia o envio.
-      const findByConversationId = vi
+      const findRecentByConversationId = vi
         .fn()
         .mockResolvedValueOnce([inbound])
         .mockResolvedValueOnce([
@@ -424,7 +424,7 @@ describe("MessageProcessingProcessor", () => {
       const processor = createMessageProcessingProcessor({
         messageRepository: {
           findById: vi.fn().mockResolvedValue(inbound),
-          findByConversationId,
+          findRecentByConversationId,
         },
         conversationRepository: {
           findById: vi
@@ -451,21 +451,22 @@ describe("MessageProcessingProcessor", () => {
         skipped: true,
         reason: "manually_answered",
       });
-      expect(findByConversationId).toHaveBeenCalledTimes(2); // double-check
+      expect(findRecentByConversationId).toHaveBeenCalledTimes(2); // double-check
     });
 
-    it("(e) checagem é tenant+conversa-scoped (usa findByConversationId com o tenantId)", async () => {
+    it("(e) checagem é tenant+conversa-scoped (usa findRecentByConversationId com o tenantId)", async () => {
       const sendMessage = vi.fn().mockResolvedValue({ id: "out-1" });
-      const { processor, findByConversationId } = build({
+      const { processor, findRecentByConversationId } = build({
         conversationMessages: [inbound],
         sendMessage,
       });
 
       await processor.processMessageJob(job);
 
-      expect(findByConversationId).toHaveBeenCalledWith(
+      expect(findRecentByConversationId).toHaveBeenCalledWith(
         "tenant-1",
-        "conversation-1"
+        "conversation-1",
+        50
       );
     });
   });
@@ -606,7 +607,7 @@ describe("MessageProcessingProcessor", () => {
     const processor = createMessageProcessingProcessor({
       messageRepository: {
         findById: vi.fn().mockResolvedValue(null),
-        findByConversationId: vi.fn(),
+        findRecentByConversationId: vi.fn(),
       },
       conversationRepository: {
         findById: vi.fn(),

@@ -93,6 +93,18 @@ WHERE tenant_id = :tenant_id
 ORDER BY created_at DESC, id DESC
 LIMIT 31;
 
+-- 2c) Worker auto-reply — janela de contexto BOUNDED (achado A-02 corrigido).
+--     O worker NÃO carrega mais a conversa inteira: usa as últimas N (=50)
+--     mensagens (findRecentByConversationId), mesmo acesso da página acima.
+--     Índice esperado: whatsapp_messages_tenant_conversation_created_idx.
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT id, direction, status, length(body) AS body_len, created_at
+FROM whatsapp_messages
+WHERE tenant_id = :tenant_id
+  AND conversation_id = :conversation_id
+ORDER BY created_at DESC, id DESC
+LIMIT 51;
+
 -- -----------------------------------------------------------------------------
 -- 3) Busca textual dentro da conversa (ILIKE no body)
 --    Atenção: ILIKE '%termo%' tem wildcard à esquerda → não usa índice btree no

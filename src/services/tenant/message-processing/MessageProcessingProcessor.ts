@@ -24,6 +24,18 @@ import type {
   MessageProcessingResult,
 } from "../../../queues/message-processing/MessageProcessingQueueTypes.js";
 
+/**
+ * Janela máxima de mensagens recentes carregadas por job para o contexto do
+ * auto-reply (achado A-02). Antes o worker carregava a conversa INTEIRA duas vezes
+ * por job — risco de escala em conversas longas. Esta janela:
+ * - cobre com folga os sinais da AutoReplyPolicy (resposta manual/auto em/após o
+ *   inbound atual, que são sempre as mensagens MAIS recentes);
+ * - supera o historyLimit da IA (AiResponseService corta para as últimas 10), então
+ *   o prompt recebe exatamente o mesmo histórico efetivo de antes.
+ * Constante interna (sem env novo), alinhada ao padrão do projeto.
+ */
+const AUTO_REPLY_CONTEXT_MESSAGE_LIMIT = 50;
+
 /** Contrato mínimo do outbound usado pelo worker (facilita injeção em teste). */
 export interface OutboundReplySender {
   sendMessage(input: SendMessageInput): Promise<SendMessageOutput>;
@@ -32,7 +44,7 @@ export interface OutboundReplySender {
 export interface MessageProcessingProcessorDependencies {
   messageRepository?: Pick<
     WhatsAppMessageRepository,
-    "findById" | "findByConversationId"
+    "findById" | "findRecentByConversationId"
   >;
   conversationRepository?: Pick<WhatsAppConversationRepository, "findById">;
   aiResponseService?: Pick<AiResponseService, "generateResponse">;
@@ -48,7 +60,7 @@ export interface MessageProcessingProcessorDependencies {
 interface ResolvedProcessorDependencies {
   messageRepository: Pick<
     WhatsAppMessageRepository,
-    "findById" | "findByConversationId"
+    "findById" | "findRecentByConversationId"
   >;
   conversationRepository: Pick<WhatsAppConversationRepository, "findById">;
   aiResponseService: Pick<AiResponseService, "generateResponse">;
@@ -109,10 +121,13 @@ export class MessageProcessingProcessor {
       };
     }
 
+    // A-02: contexto BOUNDED (últimas N), não a conversa inteira. Cobre a policy
+    // (sinais sempre recentes) e a IA (que ainda corta para as últimas 10).
     const conversationMessages =
-      await this.dependencies.messageRepository.findByConversationId(
+      await this.dependencies.messageRepository.findRecentByConversationId(
         payload.tenantId,
-        payload.conversationId
+        payload.conversationId,
+        AUTO_REPLY_CONTEXT_MESSAGE_LIMIT
       );
 
     const autoReplyOn =
@@ -174,9 +189,10 @@ export class MessageProcessingProcessor {
     // corrida (operador responde DURANTE a geração) e checa vacuidade da IA.
     if (autoReplyOn) {
       const freshMessages =
-        await this.dependencies.messageRepository.findByConversationId(
+        await this.dependencies.messageRepository.findRecentByConversationId(
           payload.tenantId,
-          payload.conversationId
+          payload.conversationId,
+          AUTO_REPLY_CONTEXT_MESSAGE_LIMIT
         );
       const decision = AutoReplyPolicy.decide({
         autoReplyEnabled: true,
