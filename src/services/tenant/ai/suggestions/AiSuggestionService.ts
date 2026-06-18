@@ -7,6 +7,7 @@ import {
 import {
   AiInteractionLogService,
 } from "../interactions/AiInteractionLogService.js";
+import { GUARDRAIL_BLOCKED_RESPONSE } from "../guardrails/AiGuardrailResponses.js";
 import {
   buildAiSystemPrompt,
   type AiSystemPromptResult,
@@ -29,7 +30,7 @@ import type {
 import type { AiInteractionStage } from "../../../../types/tenant/ai/AiInteractionTypes.js";
 
 export const AI_SUGGESTION_BLOCKED_USER_MESSAGE =
-  "Não consegui gerar uma sugestão segura para essa mensagem. Revise manualmente antes de responder.";
+  GUARDRAIL_BLOCKED_RESPONSE;
 
 export const AI_SUGGESTION_OUTPUT_BLOCKED_USER_MESSAGE =
   "A sugestão gerada foi bloqueada por segurança. Revise manualmente antes de responder.";
@@ -134,7 +135,7 @@ export class AiSuggestionService {
         source: null,
         promptVersion: null,
         inputCharCount: input.userMessage.length,
-        outputCharCount: null,
+        outputCharCount: AI_SUGGESTION_BLOCKED_USER_MESSAGE.length,
         model: null,
       });
 

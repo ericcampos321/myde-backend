@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createLogger } from "../../../shared/logger/logger.js";
+import { GUARDRAIL_BLOCKED_RESPONSE } from "../ai/guardrails/AiGuardrailResponses.js";
 import { createMessageProcessingProcessor } from "./index.js";
 
 describe("MessageProcessingProcessor", () => {
@@ -78,7 +79,11 @@ describe("MessageProcessingProcessor", () => {
     aiText?: string;
     direction?: string;
     record?: ReturnType<typeof vi.fn>;
+    countRecentHighRisk?: ReturnType<typeof vi.fn>;
     generateResponse?: ReturnType<typeof vi.fn>;
+    safetyGuard?: {
+      analyzeInput: ReturnType<typeof vi.fn>;
+    };
   }) {
     return createMessageProcessingProcessor({
       messageRepository: {
@@ -107,7 +112,13 @@ describe("MessageProcessingProcessor", () => {
             source: "stub",
           }),
       },
-      interactionLogService: { record: opts.record ?? vi.fn() },
+      interactionLogService: {
+        record: opts.record ?? vi.fn(),
+        ...(opts.countRecentHighRisk
+          ? { countRecentHighRisk: opts.countRecentHighRisk }
+          : {}),
+      },
+      safetyGuard: opts.safetyGuard,
       log: createLogger({ test: "processor" }),
       autoReplyEnabled: opts.autoReplyEnabled,
       outboundService: opts.outboundService,
@@ -152,6 +163,90 @@ describe("MessageProcessingProcessor", () => {
       text: "Olá! Como posso ajudar?",
       replyToMessageId: "message-1",
     });
+  });
+
+  it("auto-reply bloqueado por guardrail: não chama IA, registra auditoria e envia alerta sem retry", async () => {
+    const sendMessage = vi.fn().mockResolvedValue({ id: "out-guardrail" });
+    const record = vi.fn();
+    const countRecentHighRisk = vi.fn().mockResolvedValue(0);
+    const generateResponse = vi.fn();
+    const safetyGuard = {
+      analyzeInput: vi.fn().mockReturnValue({
+        action: "block",
+        riskLevel: "high",
+        riskReasons: ["prompt_injection", "secret_exfiltration"],
+        matchedRules: [
+          "prompt_injection_ignore_previous_instructions",
+          "secret_extraction_sensitive_credentials",
+        ],
+        blocked: true,
+      }),
+    };
+    const processor = buildProcessorWithAutoReply({
+      autoReplyEnabled: true,
+      outboundService: { sendMessage },
+      record,
+      countRecentHighRisk,
+      generateResponse,
+      safetyGuard,
+    });
+
+    const result = await processor.processMessageJob(job);
+
+    expect(generateResponse).not.toHaveBeenCalled();
+    expect(sendMessage).toHaveBeenCalledWith({
+      tenantId: "tenant-1",
+      conversationId: "conversation-1",
+      text: GUARDRAIL_BLOCKED_RESPONSE,
+      replyToMessageId: "message-1",
+    });
+    expect(record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stage: "auto_reply",
+        action: "block",
+        riskLevel: "high",
+        riskReasons: ["prompt_injection", "secret_exfiltration"],
+        blocked: true,
+        source: null,
+        provider: null,
+        model: null,
+        outputCharCount: GUARDRAIL_BLOCKED_RESPONSE.length,
+        promptTokens: null,
+        completionTokens: null,
+        totalTokens: null,
+      })
+    );
+    expect(result).toEqual({
+      processed: true,
+      messageId: "message-1",
+      conversationId: "conversation-1",
+      aiResponseText: GUARDRAIL_BLOCKED_RESPONSE,
+    });
+  });
+
+  it("auto-reply bloqueado por guardrail não entra em retry se envio do alerta falhar", async () => {
+    const sendMessage = vi.fn().mockRejectedValue(new Error("meta down"));
+    const generateResponse = vi.fn();
+    const processor = buildProcessorWithAutoReply({
+      autoReplyEnabled: true,
+      outboundService: { sendMessage },
+      generateResponse,
+      safetyGuard: {
+        analyzeInput: vi.fn().mockReturnValue({
+          action: "block",
+          riskLevel: "high",
+          riskReasons: ["prompt_injection"],
+          matchedRules: ["prompt_injection_ignore_previous_instructions"],
+          blocked: true,
+        }),
+      },
+    });
+
+    await expect(processor.processMessageJob(job)).resolves.toMatchObject({
+      processed: true,
+      aiResponseText: GUARDRAIL_BLOCKED_RESPONSE,
+    });
+    expect(generateResponse).not.toHaveBeenCalled();
   });
 
   it("auto-reply LIGADO mas IA vazia: skipped empty_ai_response, não envia", async () => {

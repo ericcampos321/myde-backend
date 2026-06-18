@@ -5,8 +5,11 @@ import {
   AiResponseService,
   createAiResponseService,
 } from "../ai/index.js";
+import { AiSafetyGuardService } from "../ai/guardrails/AiSafetyGuardService.js";
+import { GUARDRAIL_BLOCKED_RESPONSE } from "../ai/guardrails/AiGuardrailResponses.js";
 import { AiInteractionLogService } from "../ai/interactions/AiInteractionLogService.js";
 import type { AiResponseResult } from "../../../types/tenant/ai/AiTypes.js";
+import type { AiSafetyDecision } from "../../../types/tenant/ai/AiGuardrailTypes.js";
 import type { WhatsAppConversationRow } from "../../../db/schema/index.js";
 import {
   WhatsAppOutboundService,
@@ -35,6 +38,7 @@ import type {
  * Constante interna (sem env novo), alinhada ao padrão do projeto.
  */
 const AUTO_REPLY_CONTEXT_MESSAGE_LIMIT = 50;
+const DEFAULT_RECENT_HIGH_RISK_WINDOW_MINUTES = 10;
 
 /** Contrato mínimo do outbound usado pelo worker (facilita injeção em teste). */
 export interface OutboundReplySender {
@@ -49,7 +53,9 @@ export interface MessageProcessingProcessorDependencies {
   conversationRepository?: Pick<WhatsAppConversationRepository, "findById">;
   aiResponseService?: Pick<AiResponseService, "generateResponse">;
   /** Registra uso seguro da IA (controle de custo). Default: serviço real. */
-  interactionLogService?: Pick<AiInteractionLogService, "record">;
+  interactionLogService?: Pick<AiInteractionLogService, "record"> &
+    Partial<Pick<AiInteractionLogService, "countRecentHighRisk">>;
+  safetyGuard?: Pick<AiSafetyGuardService, "analyzeInput">;
   log?: Logger;
   /** Liga o envio automático da resposta. Default: flag de ambiente. */
   autoReplyEnabled?: boolean;
@@ -64,7 +70,11 @@ interface ResolvedProcessorDependencies {
   >;
   conversationRepository: Pick<WhatsAppConversationRepository, "findById">;
   aiResponseService: Pick<AiResponseService, "generateResponse">;
-  interactionLogService: Pick<AiInteractionLogService, "record">;
+  interactionLogService: Pick<
+    AiInteractionLogService,
+    "record" | "countRecentHighRisk"
+  >;
+  safetyGuard: Pick<AiSafetyGuardService, "analyzeInput">;
   log: Logger;
   autoReplyEnabled: boolean;
   outboundService: OutboundReplySender | null;
@@ -150,6 +160,39 @@ export class MessageProcessingProcessor {
       }
     }
 
+    const recentHighRiskCount =
+      await this.dependencies.interactionLogService.countRecentHighRisk({
+        tenantId: payload.tenantId,
+        conversationId: payload.conversationId,
+        since: new Date(
+          Date.now() - DEFAULT_RECENT_HIGH_RISK_WINDOW_MINUTES * 60_000
+        ),
+      });
+    const inputDecision = this.dependencies.safetyGuard.analyzeInput({
+      text: message.body,
+      recentHighRiskCount,
+    });
+
+    if (inputDecision.action === "block") {
+      await this.recordAutoReplyGuardrailBlock({
+        payload,
+        conversation,
+        inputCharCount: message.body.length,
+        decision: inputDecision,
+      });
+
+      if (autoReplyOn) {
+        await this.sendGuardrailBlockedReply(payload);
+      }
+
+      return {
+        processed: true,
+        messageId: message.id,
+        conversationId: conversation.id,
+        aiResponseText: GUARDRAIL_BLOCKED_RESPONSE,
+      };
+    }
+
     const aiStartedAt = Date.now();
     const aiResponse = await this.dependencies.aiResponseService.generateResponse(
       {
@@ -215,6 +258,52 @@ export class MessageProcessingProcessor {
       aiResponseText: aiResponse.text,
       aiSource: aiResponse.source,
     };
+  }
+
+  private async recordAutoReplyGuardrailBlock(args: {
+    payload: MessageProcessingJobPayload;
+    conversation: Pick<WhatsAppConversationRow, "id" | "contactId">;
+    inputCharCount: number;
+    decision: AiSafetyDecision;
+  }): Promise<void> {
+    const { payload, conversation, inputCharCount, decision } = args;
+    try {
+      await this.dependencies.interactionLogService.record({
+        tenantId: payload.tenantId,
+        conversationId: conversation.id,
+        contactId: conversation.contactId,
+        operatorId: null,
+        stage: "auto_reply",
+        action: "block",
+        riskLevel: decision.riskLevel,
+        riskReasons: decision.riskReasons,
+        matchedRules: decision.matchedRules,
+        blocked: true,
+        source: null,
+        provider: null,
+        promptVersion: null,
+        inputCharCount,
+        outputCharCount: GUARDRAIL_BLOCKED_RESPONSE.length,
+        model: null,
+        promptTokens: null,
+        cachedPromptTokens: null,
+        completionTokens: null,
+        totalTokens: null,
+        durationMs: null,
+        contextItemsCount: null,
+        contextChars: null,
+      });
+    } catch (error) {
+      this.dependencies.log.warn(
+        {
+          tenantId: payload.tenantId,
+          conversationId: conversation.id,
+          messageId: payload.messageId,
+          error: error instanceof Error ? error.message : "unknown",
+        },
+        "[auto-reply] falha ao registrar bloqueio de guardrail (ignorado)"
+      );
+    }
   }
 
   /**
@@ -337,6 +426,38 @@ export class MessageProcessingProcessor {
       throw error;
     }
   }
+
+  private async sendGuardrailBlockedReply(
+    payload: MessageProcessingJobPayload
+  ): Promise<void> {
+    try {
+      await this.dependencies.outboundService!.sendMessage({
+        tenantId: payload.tenantId,
+        conversationId: payload.conversationId,
+        text: GUARDRAIL_BLOCKED_RESPONSE,
+        replyToMessageId: payload.messageId,
+      });
+      this.dependencies.log.info(
+        {
+          tenantId: payload.tenantId,
+          conversationId: payload.conversationId,
+          messageId: payload.messageId,
+        },
+        "[auto-reply] resposta de guardrail enviada ao cliente"
+      );
+    } catch (error) {
+      this.dependencies.log.warn(
+        {
+          tenantId: payload.tenantId,
+          conversationId: payload.conversationId,
+          messageId: payload.messageId,
+          code: (error as { code?: string })?.code,
+          error: error instanceof Error ? error.message : "unknown",
+        },
+        "[auto-reply] falha ao enviar resposta de guardrail (sem retry)"
+      );
+    }
+  }
 }
 
 export function createMessageProcessingProcessor(
@@ -357,12 +478,31 @@ export function createMessageProcessingProcessor(
       dependencies.conversationRepository ?? new WhatsAppConversationRepository(),
     aiResponseService:
       dependencies.aiResponseService ?? createAiResponseService(),
-    interactionLogService:
-      dependencies.interactionLogService ?? new AiInteractionLogService(),
+    interactionLogService: resolveInteractionLogService(
+      dependencies.interactionLogService
+    ),
+    safetyGuard: dependencies.safetyGuard ?? new AiSafetyGuardService(),
     log:
       dependencies.log ??
       createLogger({ module: "message-processing-processor" }),
     autoReplyEnabled,
     outboundService,
   });
+}
+
+function resolveInteractionLogService(
+  service:
+    | (Pick<AiInteractionLogService, "record"> &
+        Partial<Pick<AiInteractionLogService, "countRecentHighRisk">>)
+    | undefined
+): Pick<AiInteractionLogService, "record" | "countRecentHighRisk"> {
+  if (!service) {
+    return new AiInteractionLogService();
+  }
+
+  return {
+    record: service.record.bind(service),
+    countRecentHighRisk:
+      service.countRecentHighRisk?.bind(service) ?? (async () => 0),
+  };
 }

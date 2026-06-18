@@ -5,6 +5,7 @@ export type AiRiskAction = "allow" | "flag" | "block";
 export type AiRiskReason =
   | "prompt_injection"
   | "secret_extraction"
+  | "secret_exfiltration"
   | "business_scope_bypass"
   | "policy_bypass"
   | "tool_abuse"

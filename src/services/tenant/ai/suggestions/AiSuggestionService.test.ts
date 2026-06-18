@@ -226,7 +226,7 @@ describe("AiSuggestionService", () => {
       source: null,
       promptVersion: null,
       inputCharCount: baseInput.userMessage.length,
-      outputCharCount: null,
+      outputCharCount: AI_SUGGESTION_BLOCKED_USER_MESSAGE.length,
       model: null,
     });
     expect(result).toEqual({
