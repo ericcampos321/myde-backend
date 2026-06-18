@@ -22,10 +22,25 @@ CREATE TABLE "ai_interaction_logs" (
 	CONSTRAINT "ai_interaction_logs_input_char_count_non_negative_check" CHECK ("ai_interaction_logs"."input_char_count" >= 0),
 	CONSTRAINT "ai_interaction_logs_output_char_count_non_negative_check" CHECK ("ai_interaction_logs"."output_char_count" is null or "ai_interaction_logs"."output_char_count" >= 0)
 );
---> statement-breakpoint
-ALTER TABLE "ai_interaction_logs" ADD CONSTRAINT "ai_interaction_logs_tenant_id_tenants_id_fk" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "ai_interaction_logs" ADD CONSTRAINT "ai_interaction_logs_conversation_tenant_fk" FOREIGN KEY ("conversation_id","tenant_id") REFERENCES "public"."whatsapp_conversations"("id","tenant_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "ai_interaction_logs" ADD CONSTRAINT "ai_interaction_logs_contact_tenant_fk" FOREIGN KEY ("contact_id","tenant_id") REFERENCES "public"."whatsapp_contacts"("id","tenant_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-CREATE INDEX "ai_interaction_logs_tenant_created_at_idx" ON "ai_interaction_logs" USING btree ("tenant_id","created_at" DESC NULLS LAST);--> statement-breakpoint
-CREATE INDEX "ai_interaction_logs_conversation_created_at_idx" ON "ai_interaction_logs" USING btree ("conversation_id","created_at" DESC NULLS LAST);--> statement-breakpoint
-CREATE INDEX "ai_interaction_logs_tenant_conversation_created_at_idx" ON "ai_interaction_logs" USING btree ("tenant_id","conversation_id","created_at" DESC NULLS LAST);
+
+ALTER TABLE "ai_interaction_logs" ADD CONSTRAINT "ai_interaction_logs_tenant_id_tenants_id_fk" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id") ON DELETE no action ON UPDATE no action;
+
+ALTER TABLE "ai_interaction_logs" ADD CONSTRAINT "ai_interaction_logs_conversation_tenant_fk" FOREIGN KEY ("conversation_id","tenant_id") REFERENCES "public"."whatsapp_conversations"("id","tenant_id") ON DELETE no action ON UPDATE no action;
+
+ALTER TABLE "ai_interaction_logs" ADD CONSTRAINT "ai_interaction_logs_contact_tenant_fk" FOREIGN KEY ("contact_id","tenant_id") REFERENCES "public"."whatsapp_contacts"("id","tenant_id") ON DELETE no action ON UPDATE no action;
+
+CREATE INDEX "ai_interaction_logs_tenant_created_at_idx" ON "ai_interaction_logs" USING btree (
+    "tenant_id",
+    "created_at" DESC NULLS LAST
+);
+
+CREATE INDEX "ai_interaction_logs_conversation_created_at_idx" ON "ai_interaction_logs" USING btree (
+    "conversation_id",
+    "created_at" DESC NULLS LAST
+);
+
+CREATE INDEX "ai_interaction_logs_tenant_conversation_created_at_idx" ON "ai_interaction_logs" USING btree (
+    "tenant_id",
+    "conversation_id",
+    "created_at" DESC NULLS LAST
+);
