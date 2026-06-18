@@ -61,26 +61,17 @@ export function findMissingColumns(
   requiredColumns: readonly RequiredColumn[],
   existingColumns: readonly ExistingColumn[]
 ): RequiredColumn[] {
-  const existing = new Set(
-    existingColumns.map((column) => `${column.table_name}.${column.column_name}`)
-  );
+  const existing = new Set(existingColumns.map((column) => `${column.table_name}.${column.column_name}`));
 
-  return requiredColumns.filter(
-    (column) => !existing.has(`${column.tableName}.${column.columnName}`)
-  );
+  return requiredColumns.filter((column) => !existing.has(`${column.tableName}.${column.columnName}`));
 }
 
-export function formatMissingSchemaMessage(
-  missingColumns: readonly RequiredColumn[]
-): string {
+export function formatMissingSchemaMessage(missingColumns: readonly RequiredColumn[]): string {
   return [
     "Banco local desatualizado. Rode: npm run db:migrate",
     "",
     "Itens ausentes:",
-    ...missingColumns.map(
-      (column) =>
-        `- ${column.tableName}.${column.columnName} (migration ${column.migration})`
-    ),
+    ...missingColumns.map((column) => `- ${column.tableName}.${column.columnName} (migration ${column.migration})`),
   ].join("\n");
 }
 
@@ -88,9 +79,7 @@ async function checkDbSchema(): Promise<void> {
   const sql = postgres(env.DATABASE_URL, { max: 1 });
 
   try {
-    const tableNames = [
-      ...new Set(REQUIRED_DB_COLUMNS.map((column) => column.tableName)),
-    ];
+    const tableNames = [...new Set(REQUIRED_DB_COLUMNS.map((column) => column.tableName))];
     const rows = await sql<ExistingColumn[]>`
       select table_name, column_name
       from information_schema.columns
