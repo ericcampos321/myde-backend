@@ -1,0 +1,313 @@
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import postgres from "postgres";
+import { and, eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/postgres-js";
+import { env } from "../../../config/env.js";
+import * as schema from "../../../db/schema/index.js";
+import {
+  tenants,
+  whatsappContacts,
+  whatsappConversations,
+  whatsappMessages,
+} from "../../../db/schema/index.js";
+import {
+  WhatsAppOutboundService,
+  type MetaOutboundClient,
+} from "./WhatsAppOutboundService.js";
+import { WhatsAppMessageRepository } from "../../../repositories/tenant/whatsapp/index.js";
+
+const runDatabaseTests = process.env.RUN_DB_TESTS === "true";
+const describeDatabase = runDatabaseTests ? describe : describe.skip;
+
+const marker = `outbound-test-${Date.now()}`;
+const sql = postgres(env.DATABASE_URL, { max: 2 });
+const database = drizzle(sql, { schema });
+
+let tenantId = "";
+let otherTenantId = "";
+let conversationId = "";
+let contactId = "";
+
+const sentCalls: Array<{ phoneNumberId: string; to: string; body: string }> =
+  [];
+
+const fakeMeta: MetaOutboundClient = {
+  async sendText(params) {
+    sentCalls.push(params);
+    return { externalMessageId: `${marker}-wamid` };
+  },
+};
+
+describeDatabase("WhatsAppOutboundService (integração persistência)", () => {
+  beforeAll(async () => {
+    const [tenant] = await database
+      .insert(tenants)
+      .values({
+        name: "Outbound Test Tenant",
+        phoneNumberId: `${marker}-phone`,
+        wabaId: `${marker}-waba`,
+      })
+      .returning();
+    tenantId = tenant!.id;
+
+    const [otherTenant] = await database
+      .insert(tenants)
+      .values({
+        name: "Outbound Other Tenant",
+        phoneNumberId: `${marker}-other-phone`,
+      })
+      .returning();
+    otherTenantId = otherTenant!.id;
+
+    const [contact] = await database
+      .insert(whatsappContacts)
+      .values({
+        tenantId,
+        phone: "5511988887777",
+        name: "Cliente Outbound",
+      })
+      .returning();
+    contactId = contact!.id;
+
+    const [conversation] = await database
+      .insert(whatsappConversations)
+      .values({
+        tenantId,
+        contactId,
+        status: "open",
+      })
+      .returning();
+    conversationId = conversation!.id;
+  });
+
+  afterAll(async () => {
+    await database
+      .delete(whatsappMessages)
+      .where(eq(whatsappMessages.tenantId, tenantId));
+    await database
+      .delete(whatsappConversations)
+      .where(eq(whatsappConversations.tenantId, tenantId));
+    await database
+      .delete(whatsappContacts)
+      .where(eq(whatsappContacts.tenantId, tenantId));
+    await database.delete(tenants).where(eq(tenants.id, tenantId));
+    await database.delete(tenants).where(eq(tenants.id, otherTenantId));
+    await sql.end({ timeout: 5 });
+  });
+
+  it("envia pela Meta com o phoneNumberId do tenant e persiste outbound", async () => {
+    const service = new WhatsAppOutboundService({ metaClient: fakeMeta });
+
+    const result = await service.sendMessage({
+      tenantId,
+      conversationId,
+      text: "Olá, tudo bem?",
+    });
+
+    expect(result.direction).toBe("outbound");
+    expect(result.status).toBe("sent");
+    expect(result.externalMessageId).toBe(`${marker}-wamid`);
+
+    // Enviou usando o phoneNumberId do tenant, não um valor global.
+    expect(sentCalls.at(-1)).toMatchObject({
+      phoneNumberId: `${marker}-phone`,
+      to: "5511988887777",
+      body: "Olá, tudo bem?",
+    });
+
+    const [persisted] = await database
+      .select()
+      .from(whatsappMessages)
+      .where(
+        and(
+          eq(whatsappMessages.tenantId, tenantId),
+          eq(whatsappMessages.id, result.id)
+        )
+      )
+      .limit(1);
+
+    expect(persisted?.direction).toBe("outbound");
+    expect(persisted?.status).toBe("sent");
+    expect(persisted?.externalMessageId).toBe(`${marker}-wamid`);
+    expect(persisted?.body).toBe("Olá, tudo bem?");
+
+    const [conversation] = await database
+      .select()
+      .from(whatsappConversations)
+      .where(eq(whatsappConversations.id, conversationId))
+      .limit(1);
+    expect(conversation?.lastMessageAt).not.toBeNull();
+  });
+
+  it("rejeita conversa de outro tenant (isolamento)", async () => {
+    const service = new WhatsAppOutboundService({ metaClient: fakeMeta });
+
+    // Tenta enviar usando o tenant errado para uma conversa que existe sob outro tenant.
+    await expect(
+      service.sendMessage({
+        tenantId: otherTenantId,
+        conversationId,
+        text: "mensagem indevida",
+      })
+    ).rejects.toMatchObject({ code: "CONVERSATION_NOT_FOUND" });
+  });
+
+  it("rejeita tenant inexistente", async () => {
+    const service = new WhatsAppOutboundService({ metaClient: fakeMeta });
+
+    await expect(
+      service.sendMessage({
+        tenantId: "00000000-0000-0000-0000-0000000000ff",
+        conversationId,
+        text: "teste",
+      })
+    ).rejects.toMatchObject({ code: "TENANT_NOT_FOUND" });
+  });
+
+  it("atualiza status da outbound por externalMessageId (statuses[] failed), tenant-scoped", async () => {
+    const repo = new WhatsAppMessageRepository(database);
+    const wamid = `${marker}-status-wamid`;
+    await database.insert(whatsappMessages).values({
+      tenantId,
+      conversationId,
+      direction: "outbound",
+      body: "mensagem para status",
+      status: "sent",
+      externalMessageId: wamid,
+    });
+
+    // Tenant errado NÃO atualiza (isolamento).
+    const wrong = await repo.updateStatusByExternalMessageId(
+      otherTenantId,
+      wamid,
+      "failed",
+      { code: 131026, reason: "Message undeliverable" }
+    );
+    expect(wrong).toBeNull();
+
+    // Tenant certo atualiza para "failed" + grava o motivo da Meta.
+    const updated = await repo.updateStatusByExternalMessageId(
+      tenantId,
+      wamid,
+      "failed",
+      { code: 131026, reason: "Message undeliverable" }
+    );
+    expect(updated?.status).toBe("failed");
+    expect(updated?.failureCode).toBe(131026);
+    expect(updated?.failureReason).toBe("Message undeliverable");
+    expect(updated?.failedAt).not.toBeNull();
+
+    const [row] = await database
+      .select()
+      .from(whatsappMessages)
+      .where(
+        and(
+          eq(whatsappMessages.tenantId, tenantId),
+          eq(whatsappMessages.externalMessageId, wamid)
+        )
+      );
+    expect(row?.status).toBe("failed");
+    expect(row?.failureCode).toBe(131026);
+    expect(row?.failureReason).toBe("Message undeliverable");
+  });
+
+  it("falha da Meta NÃO persiste outbound (Meta primeiro)", async () => {
+    const failingMeta: MetaOutboundClient = {
+      async sendText() {
+        throw new Error("meta indisponível");
+      },
+    };
+    const service = new WhatsAppOutboundService({ metaClient: failingMeta });
+
+    const before = await database
+      .select()
+      .from(whatsappMessages)
+      .where(
+        and(
+          eq(whatsappMessages.tenantId, tenantId),
+          eq(whatsappMessages.direction, "outbound")
+        )
+      );
+
+    await expect(
+      service.sendMessage({
+        tenantId,
+        conversationId,
+        text: "não deveria persistir",
+      })
+    ).rejects.toBeTruthy();
+
+    const after = await database
+      .select()
+      .from(whatsappMessages)
+      .where(
+        and(
+          eq(whatsappMessages.tenantId, tenantId),
+          eq(whatsappMessages.direction, "outbound")
+        )
+      );
+
+    // Nenhuma outbound nova foi gravada (não fica "sent" sem envio real).
+    expect(after.length).toBe(before.length);
+    expect(
+      after.some((m) => m.body === "não deveria persistir")
+    ).toBe(false);
+  });
+
+  it("idempotência: replyToMessageId repetido envia à Meta só uma vez", async () => {
+    // Meta client local: id único por chamada (evita colidir com outros testes)
+    // e conta quantas vezes a Meta foi efetivamente chamada.
+    let metaCalls = 0;
+    const localMeta: MetaOutboundClient = {
+      async sendText() {
+        metaCalls += 1;
+        return { externalMessageId: `${marker}-reply-${metaCalls}` };
+      },
+    };
+    const service = new WhatsAppOutboundService({ metaClient: localMeta });
+
+    // Cria um inbound para servir de origem (replyToMessageId é FK p/ messages).
+    const [inbound] = await database
+      .insert(whatsappMessages)
+      .values({
+        tenantId,
+        conversationId,
+        direction: "inbound",
+        body: "oi, me ajuda?",
+        status: "received",
+        externalMessageId: `${marker}-inbound`,
+      })
+      .returning();
+
+    const first = await service.sendMessage({
+      tenantId,
+      conversationId,
+      text: "Resposta automática",
+      replyToMessageId: inbound!.id,
+    });
+
+    // Segunda chamada simula retry do job com o mesmo inbound.
+    const second = await service.sendMessage({
+      tenantId,
+      conversationId,
+      text: "Resposta automática",
+      replyToMessageId: inbound!.id,
+    });
+
+    // Meta chamada apenas UMA vez; a 2ª retorna a mesma outbound (idempotente).
+    expect(metaCalls).toBe(1);
+    expect(second.id).toBe(first.id);
+
+    // Existe exatamente uma outbound respondendo a esse inbound.
+    const replies = await database
+      .select()
+      .from(whatsappMessages)
+      .where(
+        and(
+          eq(whatsappMessages.tenantId, tenantId),
+          eq(whatsappMessages.replyToMessageId, inbound!.id)
+        )
+      );
+    expect(replies.length).toBe(1);
+  });
+});
